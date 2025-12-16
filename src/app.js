@@ -33,19 +33,37 @@ app.use(
 );
 
 /* =======================
+   SAFE ROUTE LOADER
+======================= */
+
+const safeUse = (path, modulePath) => {
+  try {
+    const route = require(modulePath);
+
+    if (typeof route !== "function") {
+      throw new Error(
+        `Route at ${modulePath} does not export an Express router`
+      );
+    }
+
+    app.use(path, route);
+    console.log(`  Loaded route: ${path}`);
+  } catch (err) {
+    console.error(`  Failed to load route ${path}`);
+    console.error(err.message);
+  }
+};
+
+/* =======================
    ROUTES
 ======================= */
 
-app.use("/api/auth", require("./modules/auth/authRoutes"));
-app.use("/api/users", require("./modules/users/userRoutes"));
-app.use("/api/reviewer", require("./modules/reviewer/reviewerRoutes"));
-
-// Admin routes (safe-load)
-try {
-  app.use("/api/admin", require("./modules/admin/adminRoutes"));
-} catch (err) {
-  console.warn("⚠️ Admin routes not loaded yet");
-}
+safeUse("/api/auth", "./modules/auth/authRoutes");
+safeUse("/api/users", "./modules/users/userRoutes");
+safeUse(
+  "/api/reviewer/availability",
+  "./modules/reviewerAvailability/availabilityRoutes"
+);
 
 /* =======================
    HEALTH CHECK
