@@ -54,6 +54,7 @@ exports.createAvailability = async (req, res) => {
 ====================================================== */
 exports.getMyAvailability = async (req, res) => {
   try {
+    res.set("Cache-Control", "no-store");
     const reviewerId = req.user.id;
 
     const slots = await ReviewerAvailability.find({ reviewerId }).sort({

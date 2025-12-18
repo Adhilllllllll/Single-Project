@@ -1,9 +1,11 @@
-// const express = require("express");
-// const router = express.Router();
+ const router = require("express").Router();
+const authMiddleware = require("../../middlewares/authMiddleware");
+const adminController = require("./adminController");
 
-// // TEMP placeholder
-// router.get("/health", (req, res) => {
-//   res.json({ message: "Admin module ready" });
-// });
+router.get(
+  "/dashboard-counts",
+  authMiddleware("admin"),
+  adminController.getDashboardCounts
+);
 
-// module.exports = router;
+module.exports = router;

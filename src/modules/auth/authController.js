@@ -63,14 +63,14 @@ console.log(" BODY:", req.body);
     }
 
     // 5️⃣ First-time login → force password change
-    if (account.mustChangePassword) {
-      return res.status(200).json({
-        message: "Password change required",
-        mustChangePassword: true,
-        accountType,
-        accountId: account._id,
-      });
-    }
+    // if (account.mustChangePassword) {
+    //   return res.status(200).json({
+    //     message: "Password change required",
+    //     mustChangePassword: true,
+    //     accountType,
+    //     accountId: account._id,
+    //   });
+    // }
 
     // 6️⃣ Generate access token
     const tokenPayload = {
@@ -82,17 +82,16 @@ console.log(" BODY:", req.body);
     const accessToken = signAccessToken(tokenPayload);
 
     // 7️⃣ Success response
-    return res.json({
-      message: "Login successful",
-      accessToken,
-      accountType,
-      user: {
-        id: account._id,
-        name: account.name,
-        email: account.email,
-        role: tokenPayload.role,
-      },
-    });
+    return res.status(200).json({
+  accessToken,
+  user: {
+    id: account._id,
+    name: account.name,
+    email: account.email,
+    role: tokenPayload.role,
+  },
+});
+
   } catch (err) {
     console.error("LOGIN ERROR:", err);
     return res.status(500).json({
