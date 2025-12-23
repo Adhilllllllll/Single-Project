@@ -66,13 +66,13 @@ safeUse(
   "/api/reviewer/availability",
   "./modules/reviewerAvailability/availabilityRoutes"
 );
-
+safeUse("/api/reviews", "./modules/reviews/reviewRoutes");
 /* =======================
    HEALTH CHECK
 ======================= */
 
 app.get("/", (req, res) => {
-  res.status(200).send("RMS Backend Running 🚀");
+  res.status(200).send("RMS Backend Running");
 });
 
 /* =======================
@@ -90,7 +90,7 @@ app.use((req, res) => {
 ======================= */
 
 app.use((err, req, res, next) => {
-  console.error("🔥 Global Error:", err);
+  console.error("Global Error:", err);
 
   res.status(err.status || 500).json({
     message: err.message || "Internal Server Error",
