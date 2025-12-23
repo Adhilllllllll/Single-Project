@@ -58,6 +58,8 @@ const safeUse = (path, modulePath) => {
    ROUTES
 ======================= */
 
+
+safeUse("/api/admin", "./modules/admin/adminRoutes");
 safeUse("/api/auth", "./modules/auth/authRoutes");
 safeUse("/api/users", "./modules/users/userRoutes");
 safeUse(
