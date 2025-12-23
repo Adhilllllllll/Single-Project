@@ -16,10 +16,10 @@ const Student = require("../students/student");
 ====================================================== */
 exports.login = async (req, res) => {
   console.log(" AUTH LOGIN HIT");
-console.log("METHOD:", req.method);
-console.log(" URL:", req.originalUrl);
-console.log(" HEADERS:", req.headers);
-console.log(" BODY:", req.body);
+  console.log("METHOD:", req.method);
+  console.log(" URL:", req.originalUrl);
+  console.log(" HEADERS:", req.headers);
+  console.log(" BODY:", req.body);
   try {
     const { email, password } = req.body || {};
 
@@ -62,15 +62,8 @@ console.log(" BODY:", req.body);
       });
     }
 
-    // 5️⃣ First-time login → force password change
-    // if (account.mustChangePassword) {
-    //   return res.status(200).json({
-    //     message: "Password change required",
-    //     mustChangePassword: true,
-    //     accountType,
-    //     accountId: account._id,
-    //   });
-    // }
+    // 5️⃣ Check if password change is required
+    const mustChangePassword = account.mustChangePassword || false;
 
     // 6️⃣ Generate access token
     const tokenPayload = {
@@ -81,16 +74,17 @@ console.log(" BODY:", req.body);
 
     const accessToken = signAccessToken(tokenPayload);
 
-    // 7️⃣ Success response
+    // 7️⃣ Success response (include mustChangePassword flag)
     return res.status(200).json({
-  accessToken,
-  user: {
-    id: account._id,
-    name: account.name,
-    email: account.email,
-    role: tokenPayload.role,
-  },
-});
+      accessToken,
+      mustChangePassword,
+      user: {
+        id: account._id,
+        name: account.name,
+        email: account.email,
+        role: tokenPayload.role,
+      },
+    });
 
   } catch (err) {
     console.error("LOGIN ERROR:", err);
