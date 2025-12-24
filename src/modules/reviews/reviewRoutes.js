@@ -5,8 +5,8 @@ const authMiddleware = require("../../middlewares/authMiddleware");
 
 
 router.use((req, res, next) => {
-  console.log("REVIEWS ROUTER HIT:", req.method, req.originalUrl);
-  next();
+    console.log("REVIEWS ROUTER HIT:", req.method, req.originalUrl);
+    next();
 });
 
 /* =======================
@@ -36,4 +36,32 @@ router.get(
     reviewController.getMyAdvisorReviews
 );
 
+/* =======================
+   GET SINGLE REVIEW – ADVISOR
+======================= */
+router.get(
+    "/advisor/:reviewId",
+    authMiddleware("advisor"),
+    reviewController.getSingleReview
+);
+
+/* =======================
+   RESCHEDULE REVIEW – ADVISOR
+======================= */
+router.patch(
+    "/advisor/:reviewId/reschedule",
+    authMiddleware("advisor"),
+    reviewController.rescheduleReview
+);
+
+/* =======================
+   CANCEL REVIEW – ADVISOR
+======================= */
+router.patch(
+    "/advisor/:reviewId/cancel",
+    authMiddleware("advisor"),
+    reviewController.cancelReview
+);
+
 module.exports = router;
+

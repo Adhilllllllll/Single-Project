@@ -67,6 +67,7 @@ safeUse(
   "./modules/reviewerAvailability/availabilityRoutes"
 );
 safeUse("/api/reviews", "./modules/reviews/reviewRoutes");
+safeUse("/api/advisor", "./modules/advisor/advisorRoutes");
 /* =======================
    HEALTH CHECK
 ======================= */

@@ -15,4 +15,25 @@ router.get(
   advisorController.getDashboard
 );
 
+// Get students assigned to this advisor
+router.get(
+  "/students",
+  authMiddleware("advisor"),
+  advisorController.getAssignedStudents
+);
+
+// Get single student profile
+router.get(
+  "/students/:studentId",
+  authMiddleware("advisor"),
+  advisorController.getStudentProfile
+);
+
+// Get all reviewers with their availability slots
+router.get(
+  "/reviewers/availability",
+  authMiddleware("advisor"),
+  advisorController.getReviewersWithAvailability
+);
+
 module.exports = router;
