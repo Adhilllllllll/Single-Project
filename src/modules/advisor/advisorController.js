@@ -1,6 +1,7 @@
 const User = require("../users/User");
 const Student = require("../students/student");
 const ReviewerAvailability = require("../reviewerAvailability/ReviewerAvailability");
+const ReviewSession = require("../reviews/reviewSession");
 
 /**
  * GET /api/advisor/me
@@ -25,6 +26,57 @@ exports.getMyProfile = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+/**
+ * PUT /api/advisor/me
+ * Update advisor profile (name, phone, about, avatar)
+ */
+exports.updateMyProfile = async (req, res) => {
+  try {
+    const advisorId = req.user.id;
+    const { name, phone, about } = req.body;
+
+    // Validate name
+    if (!name || name.trim().length === 0) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+
+    // Build update object
+    const updateData = {
+      name: name.trim(),
+    };
+
+    if (phone !== undefined) {
+      updateData.phone = phone.trim();
+    }
+
+    if (about !== undefined) {
+      updateData.about = about.trim();
+    }
+
+    // Handle avatar upload
+    if (req.file) {
+      updateData.avatar = `/uploads/avatars/${req.file.filename}`;
+    }
+
+    const advisor = await User.findByIdAndUpdate(
+      advisorId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).select("-passwordHash");
+
+    if (!advisor) {
+      return res.status(404).json({ message: "Advisor not found" });
+    }
+
+    return res.json({
+      message: "Profile updated successfully",
+      advisor,
+    });
+  } catch (err) {
+    console.error("UPDATE ADVISOR PROFILE ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
 /**
  * GET /api/advisor/dashboard
@@ -40,14 +92,42 @@ exports.getDashboard = async (req, res) => {
       status: "active"
     });
 
-    // TODO: Add reviews count when review module is ready
+    // Get this week's date range (Monday to Sunday)
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - diffToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    // Get reviews this week
+    const reviewsThisWeek = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      scheduledAt: { $gte: weekStart, $lt: weekEnd }
+    });
+
+    // Get pending scores (completed reviews without score approval)
+    const pendingScores = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      status: "completed",
+      scoreApproved: { $ne: true }
+    });
+
+    // Calculate average progress from students
+    const students = await Student.find({ advisorId, status: "active" }).select("progress");
+    const avgProgress = students.length > 0
+      ? Math.round(students.reduce((sum, s) => sum + (s.progress || 0), 0) / students.length)
+      : 0;
+
     return res.json({
       message: "Advisor dashboard data",
       stats: {
         totalStudents,
-        avgProgress: 68, // TODO: Calculate from actual student progress
-        reviewsThisWeek: 5, // TODO: Calculate from reviews collection
-        pendingScores: 2, // TODO: Calculate from pending reviews
+        avgProgress,
+        reviewsThisWeek,
+        pendingScores,
       },
     });
   } catch (err) {

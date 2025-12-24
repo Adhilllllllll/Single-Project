@@ -229,6 +229,15 @@ const userSchema = new mongoose.Schema(
       type: String, // ex: Full Stack, Backend, UI
     },
 
+    avatar: {
+      type: String, // Path to avatar image
+    },
+
+    about: {
+      type: String, // Bio/description
+      maxLength: 500,
+    },
+
     isSuperAdmin: {
       type: Boolean,
       default: false,

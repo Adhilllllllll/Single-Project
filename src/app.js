@@ -3,6 +3,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const helmet = require("helmet");
 const morgan = require("morgan");
+const path = require("path");
 require("dotenv").config();
 
 const app = express();
@@ -11,8 +12,21 @@ const app = express();
    GLOBAL MIDDLEWARES
 ======================= */
 
-// Security headers
-app.use(helmet());
+// CORS - must be first for preflight requests
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true,
+  })
+);
+
+// Security headers (with cross-origin resource policy disabled for static files)
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
+  })
+);
 
 // Request logging
 app.use(morgan("dev"));
@@ -24,13 +38,12 @@ app.use(express.urlencoded({ extended: true }));
 // Cookies
 app.use(cookieParser());
 
-// CORS
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    credentials: true,
-  })
-);
+// Serve static files (uploads) with CORS headers
+app.use("/uploads", (req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+}, express.static(path.join(__dirname, "../uploads")));
 
 /* =======================
    SAFE ROUTE LOADER

@@ -1,12 +1,21 @@
 const router = require("express").Router();
 const authMiddleware = require("../../middlewares/authMiddleware");
 const advisorController = require("./advisorController");
+const { uploadAvatar } = require("../../middlewares/upload");
 
 // Advisor-only routes
 router.get(
   "/me",
   authMiddleware("advisor"),
   advisorController.getMyProfile
+);
+
+// Update advisor profile (with optional avatar upload)
+router.put(
+  "/me",
+  authMiddleware("advisor"),
+  uploadAvatar.single("avatar"),
+  advisorController.updateMyProfile
 );
 
 router.get(
