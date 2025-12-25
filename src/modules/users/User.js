@@ -242,6 +242,13 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    // Reviewer-specific: current availability status
+    reviewerStatus: {
+      type: String,
+      enum: ["available", "busy", "dnd"],
+      default: "available",
+    },
   },
   { timestamps: true }
 );

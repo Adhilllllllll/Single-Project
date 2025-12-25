@@ -28,8 +28,8 @@ const reviewSessionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "scheduled", "completed", "cancelled"],
-      default: "scheduled",
+      enum: ["pending", "scheduled", "accepted", "rejected", "completed", "cancelled"],
+      default: "pending",
     },
 
     scheduledAt: {

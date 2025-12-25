@@ -1,8 +1,7 @@
 const router = require("express").Router();
 const reviewController = require("./reviewController");
 const authMiddleware = require("../../middlewares/authMiddleware");
-
-
+const { uploadAvatar } = require("../../middlewares/upload");
 
 router.use((req, res, next) => {
     console.log("REVIEWS ROUTER HIT:", req.method, req.originalUrl);
@@ -25,6 +24,40 @@ router.get(
     "/reviewer/me",
     authMiddleware("reviewer"),
     reviewController.getMyReviewerReviews
+);
+
+/* =======================
+   PERFORMANCE ANALYTICS – REVIEWER (must be before :reviewId)
+======================= */
+router.get(
+    "/reviewer/performance",
+    authMiddleware("reviewer"),
+    reviewController.getPerformanceAnalytics
+);
+
+/* =======================
+   REVIEWER PROFILE (must be before :reviewId)
+======================= */
+router.get(
+    "/reviewer/profile",
+    authMiddleware("reviewer"),
+    reviewController.getReviewerProfile
+);
+
+router.put(
+    "/reviewer/profile",
+    authMiddleware("reviewer"),
+    uploadAvatar.single("avatar"),
+    reviewController.updateReviewerProfile
+);
+
+/* =======================
+   REVIEWER DASHBOARD (must be before :reviewId)
+======================= */
+router.get(
+    "/reviewer/dashboard",
+    authMiddleware("reviewer"),
+    reviewController.getReviewerDashboard
 );
 
 /* =======================
@@ -63,5 +96,31 @@ router.patch(
     reviewController.cancelReview
 );
 
-module.exports = router;
+/* =======================
+   GET SINGLE REVIEW – REVIEWER (dynamic :reviewId - must be AFTER static routes)
+======================= */
+router.get(
+    "/reviewer/:reviewId",
+    authMiddleware("reviewer"),
+    reviewController.getSingleReviewByReviewer
+);
 
+/* =======================
+   ACCEPT REVIEW – REVIEWER
+======================= */
+router.patch(
+    "/reviewer/:reviewId/accept",
+    authMiddleware("reviewer"),
+    reviewController.acceptReviewByReviewer
+);
+
+/* =======================
+   REJECT REVIEW – REVIEWER
+======================= */
+router.patch(
+    "/reviewer/:reviewId/reject",
+    authMiddleware("reviewer"),
+    reviewController.rejectReviewByReviewer
+);
+
+module.exports = router;

@@ -45,6 +45,18 @@ const reviewerAvailabilitySchema = new mongoose.Schema(
     notes: {
       type: String,
     },
+
+    // Type: 'slot' for availability, 'break' for break blocks
+    slotType: {
+      type: String,
+      enum: ["slot", "break"],
+      default: "slot",
+    },
+
+    // Label for break blocks (e.g., "Lunch Break")
+    label: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

@@ -86,12 +86,22 @@ exports.createReview = async (req, res) => {
 ====================================================== */
 exports.getMyReviewerReviews = async (req, res) => {
   try {
-    const reviews = await ReviewSession.find({
+    const { status } = req.query;
+
+    // Build query
+    const query = {
       reviewer: new mongoose.Types.ObjectId(req.user.id),
-    })
+    };
+
+    // Filter by status if provided
+    if (status) {
+      query.status = status;
+    }
+
+    const reviews = await ReviewSession.find(query)
       .populate("student", "name email")
-      .populate("advisor", "name email")
-      .sort({ scheduledAt: 1 });
+      .populate("advisor", "name email domain")
+      .sort({ scheduledAt: -1 });
 
     res.status(200).json(reviews);
   } catch (err) {
@@ -284,4 +294,403 @@ exports.cancelReview = async (req, res) => {
   }
 };
 
+/* ======================================================
+   ACCEPT REVIEW – REVIEWER
+====================================================== */
+exports.acceptReviewByReviewer = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+    const { reviewId } = req.params;
 
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      reviewer: reviewerId,
+    });
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    if (review.status !== "pending") {
+      return res.status(400).json({
+        message: `Cannot accept a review with status: ${review.status}`,
+      });
+    }
+
+    review.status = "accepted";
+    await review.save();
+
+    res.status(200).json({
+      message: "Review accepted successfully",
+      reviewId: review._id,
+      status: review.status,
+    });
+  } catch (err) {
+    console.error("Accept Review Error:", err);
+    res.status(500).json({ message: "Failed to accept review" });
+  }
+};
+
+/* ======================================================
+   REJECT REVIEW – REVIEWER
+====================================================== */
+exports.rejectReviewByReviewer = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+    const { reviewId } = req.params;
+    const { reason } = req.body;
+
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      reviewer: reviewerId,
+    });
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    if (review.status !== "pending") {
+      return res.status(400).json({
+        message: `Cannot reject a review with status: ${review.status}`,
+      });
+    }
+
+    review.status = "rejected";
+    if (reason) {
+      review.feedback = `Rejected: ${reason}`;
+    }
+    await review.save();
+
+    res.status(200).json({
+      message: "Review rejected successfully",
+      reviewId: review._id,
+      status: review.status,
+    });
+  } catch (err) {
+    console.error("Reject Review Error:", err);
+    res.status(500).json({ message: "Failed to reject review" });
+  }
+};
+
+/* ======================================================
+   GET SINGLE REVIEW – REVIEWER
+====================================================== */
+exports.getSingleReviewByReviewer = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+    const { reviewId } = req.params;
+
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      reviewer: reviewerId,
+    })
+      .populate("student", "name email")
+      .populate("advisor", "name email domain");
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    res.status(200).json({
+      review: {
+        id: review._id,
+        student: review.student?.name || "Unknown",
+        studentEmail: review.student?.email || "",
+        advisor: review.advisor?.name || "Unknown",
+        advisorEmail: review.advisor?.email || "",
+        domain: review.advisor?.domain || "General",
+        scheduledAt: review.scheduledAt,
+        week: review.week,
+        mode: review.mode,
+        status: review.status,
+        meetingLink: review.meetingLink,
+        location: review.location,
+        feedback: review.feedback,
+      },
+    });
+  } catch (err) {
+    console.error("Get Single Review Error:", err);
+    res.status(500).json({ message: "Failed to fetch review" });
+  }
+};
+
+/* ======================================================
+   GET PERFORMANCE ANALYTICS – REVIEWER
+====================================================== */
+exports.getPerformanceAnalytics = async (req, res) => {
+  try {
+    const reviewerId = new mongoose.Types.ObjectId(req.user.id);
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+    // Get all reviews for this reviewer
+    const allReviews = await ReviewSession.find({ reviewer: reviewerId });
+    const completedReviews = allReviews.filter(r => r.status === "completed");
+
+    // Total reviews
+    const totalReviews = completedReviews.length;
+
+    // Reviews this month
+    const reviewsThisMonth = completedReviews.filter(r =>
+      new Date(r.updatedAt) >= startOfMonth
+    ).length;
+
+    // Average rating (marks out of 10, convert to 5 scale)
+    const reviewsWithMarks = completedReviews.filter(r => r.marks !== undefined && r.marks !== null);
+    const avgRating = reviewsWithMarks.length > 0
+      ? Math.round((reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / reviewsWithMarks.length) * 10) / 10 / 2
+      : 0;
+
+    // On-time feedback calculation (within 24 hours of scheduledAt)
+    let onTimeCount = 0;
+    let within24Hours = 0;
+    let within48Hours = 0;
+
+    completedReviews.forEach(r => {
+      if (r.scheduledAt && r.updatedAt) {
+        const hoursToComplete = (new Date(r.updatedAt) - new Date(r.scheduledAt)) / (1000 * 60 * 60);
+        if (hoursToComplete <= 24) {
+          onTimeCount++;
+          within24Hours++;
+        } else if (hoursToComplete <= 48) {
+          onTimeCount++;
+          within48Hours++;
+        }
+      }
+    });
+
+    const onTimePercentage = totalReviews > 0
+      ? Math.round((onTimeCount / totalReviews) * 100)
+      : 0;
+
+    // Monthly reviews (last 6 months)
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthlyReviews = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+
+      const count = completedReviews.filter(r => {
+        const reviewDate = new Date(r.updatedAt);
+        return reviewDate >= monthStart && reviewDate <= monthEnd;
+      }).length;
+
+      monthlyReviews.push({
+        month: monthNames[monthStart.getMonth()],
+        count,
+      });
+    }
+
+    // Workload distribution
+    const activeReviews = allReviews.filter(r =>
+      ["pending", "accepted", "scheduled"].includes(r.status)
+    ).length;
+    const maxCapacity = 10; // Configurable
+    const availableSlots = Math.max(0, maxCapacity - activeReviews);
+    const currentLoadPercentage = Math.round((activeReviews / maxCapacity) * 100);
+
+    // Student satisfaction (rating breakdown)
+    // Convert marks (0-10) to stars (1-5)
+    const ratingBreakdown = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    reviewsWithMarks.forEach(r => {
+      const stars = Math.min(5, Math.max(1, Math.ceil(r.marks / 2)));
+      ratingBreakdown[stars]++;
+    });
+
+    res.status(200).json({
+      totalReviews,
+      reviewsThisMonth,
+      avgRating,
+      onTimePercentage,
+      monthlyReviews,
+      feedbackTimeliness: {
+        within24Hours,
+        within48Hours,
+        onTimePercent: onTimePercentage,
+      },
+      workload: {
+        activeReviews,
+        maxCapacity,
+        availableSlots,
+        currentLoadPercentage,
+      },
+      studentSatisfaction: {
+        avgRating,
+        totalRatings: reviewsWithMarks.length,
+        ratingBreakdown,
+      },
+    });
+  } catch (err) {
+    console.error("Performance Analytics Error:", err);
+    res.status(500).json({ message: "Failed to fetch performance analytics" });
+  }
+};
+
+/* ======================================================
+   GET REVIEWER PROFILE
+====================================================== */
+exports.getReviewerProfile = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+
+    const reviewer = await User.findById(reviewerId).select("-passwordHash");
+
+    if (!reviewer) {
+      return res.status(404).json({ message: "Reviewer not found" });
+    }
+
+    return res.json({
+      message: "Reviewer profile fetched",
+      reviewer,
+    });
+  } catch (err) {
+    console.error("GET REVIEWER PROFILE ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* ======================================================
+   UPDATE REVIEWER PROFILE
+====================================================== */
+exports.updateReviewerProfile = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+    const { name, phone, about, domain } = req.body;
+
+    // Validate name
+    if (!name || name.trim().length === 0) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+
+    // Build update object
+    const updateData = {
+      name: name.trim(),
+    };
+
+    if (phone !== undefined) {
+      updateData.phone = phone.trim();
+    }
+
+    if (about !== undefined) {
+      updateData.about = about.trim();
+    }
+
+    if (domain !== undefined) {
+      updateData.domain = domain.trim();
+    }
+
+    // Handle avatar upload
+    if (req.file) {
+      updateData.avatar = `/uploads/avatars/${req.file.filename}`;
+    }
+
+    const reviewer = await User.findByIdAndUpdate(
+      reviewerId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).select("-passwordHash");
+
+    if (!reviewer) {
+      return res.status(404).json({ message: "Reviewer not found" });
+    }
+
+    return res.json({
+      message: "Profile updated successfully",
+      reviewer,
+    });
+  } catch (err) {
+    console.error("UPDATE REVIEWER PROFILE ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* ======================================================
+   REVIEWER DASHBOARD DATA
+====================================================== */
+exports.getReviewerDashboard = async (req, res) => {
+  try {
+    const reviewerId = new mongoose.Types.ObjectId(req.user.id);
+    const now = new Date();
+
+    // Get all reviews for this reviewer
+    const allReviews = await ReviewSession.find({ reviewer: reviewerId })
+      .populate("student", "name email")
+      .populate("advisor", "name email")
+      .sort({ scheduledAt: 1 });
+
+    // 1. Reviews This Week (scheduled reviews in current week)
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 7);
+
+    const reviewsThisWeek = allReviews.filter((r) => {
+      const scheduledDate = new Date(r.scheduledAt);
+      return (
+        scheduledDate >= startOfWeek &&
+        scheduledDate < endOfWeek &&
+        ["scheduled", "accepted", "pending"].includes(r.status)
+      );
+    }).length;
+
+    // 2. Pending Feedback (completed but no marks/feedback)
+    const pendingFeedbackReviews = allReviews.filter(
+      (r) => r.status === "completed" && (r.marks === undefined || r.marks === null)
+    );
+
+    // 3. Total Completed
+    const totalCompleted = allReviews.filter((r) => r.status === "completed").length;
+
+    // 4. Average Rating (from marks 0-10, converted to 0-5 scale)
+    const reviewsWithMarks = allReviews.filter(
+      (r) => r.status === "completed" && r.marks !== undefined && r.marks !== null
+    );
+    const avgRating =
+      reviewsWithMarks.length > 0
+        ? (reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / reviewsWithMarks.length / 2).toFixed(1)
+        : 0;
+
+    // 5. Upcoming Reviews (scheduled/accepted, future dates, limit 5)
+    const upcomingReviews = allReviews
+      .filter(
+        (r) =>
+          ["scheduled", "accepted"].includes(r.status) &&
+          new Date(r.scheduledAt) >= now
+      )
+      .slice(0, 5)
+      .map((r) => ({
+        _id: r._id,
+        student: r.student,
+        advisor: r.advisor,
+        scheduledAt: r.scheduledAt,
+        status: r.status,
+        mode: r.mode,
+        meetingLink: r.meetingLink,
+      }));
+
+    // 6. Pending Feedback list (limit 5)
+    const pendingFeedbackList = pendingFeedbackReviews.slice(0, 5).map((r) => ({
+      _id: r._id,
+      student: r.student,
+      scheduledAt: r.scheduledAt,
+      updatedAt: r.updatedAt,
+    }));
+
+    res.status(200).json({
+      stats: {
+        reviewsThisWeek,
+        pendingFeedback: pendingFeedbackReviews.length,
+        totalCompleted,
+        avgRating: parseFloat(avgRating),
+      },
+      upcomingReviews,
+      pendingFeedbackList,
+    });
+  } catch (err) {
+    console.error("REVIEWER DASHBOARD ERROR:", err);
+    res.status(500).json({ message: "Failed to fetch dashboard data" });
+  }
+};
