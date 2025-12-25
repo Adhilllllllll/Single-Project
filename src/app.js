@@ -81,6 +81,10 @@ safeUse(
 );
 safeUse("/api/reviews", "./modules/reviews/reviewRoutes");
 safeUse("/api/advisor", "./modules/advisor/advisorRoutes");
+safeUse("/api/tasks", "./modules/tasks/taskRoutes");
+safeUse("/api/materials", "./modules/materials/materialsRoutes");
+safeUse("/api/notifications", "./modules/notifications/notificationRoutes");
+safeUse("/api/students", "./modules/students/studentRoutes");
 /* =======================
    HEALTH CHECK
 ======================= */

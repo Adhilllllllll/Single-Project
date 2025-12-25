@@ -164,6 +164,23 @@ const studentSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+
+    /* -------- PROFILE -------- */
+
+    avatar: {
+      type: String,
+      default: null, // URL to profile picture
+    },
+
+    documents: [
+      {
+        filename: String,
+        path: String,
+        type: String,
+        size: Number,
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

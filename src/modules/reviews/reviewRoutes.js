@@ -61,6 +61,33 @@ router.get(
 );
 
 /* =======================
+   STUDENT REVIEWS (must be before :reviewId)
+======================= */
+router.get(
+    "/student/upcoming",
+    authMiddleware("student"),
+    reviewController.getStudentUpcomingReviews
+);
+
+router.get(
+    "/student/history",
+    authMiddleware("student"),
+    reviewController.getStudentReviewHistory
+);
+
+router.get(
+    "/student/progress",
+    authMiddleware("student"),
+    reviewController.getStudentProgress
+);
+
+router.get(
+    "/student/:reviewId/report",
+    authMiddleware("student"),
+    reviewController.getStudentReviewReport
+);
+
+/* =======================
    GET REVIEWS – ADVISOR
 ======================= */
 router.get(

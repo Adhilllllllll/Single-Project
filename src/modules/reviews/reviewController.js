@@ -694,3 +694,224 @@ exports.getReviewerDashboard = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch dashboard data" });
   }
 };
+
+/* ======================================================
+   GET STUDENT UPCOMING REVIEWS
+====================================================== */
+exports.getStudentUpcomingReviews = async (req, res) => {
+  try {
+    const studentId = new mongoose.Types.ObjectId(req.user.id);
+    const now = new Date();
+
+    // Fetch upcoming reviews (scheduled, accepted, pending - future dates)
+    const upcomingReviews = await ReviewSession.find({
+      student: studentId,
+      status: { $in: ["pending", "scheduled", "accepted"] },
+      scheduledAt: { $gte: now },
+    })
+      .populate("advisor", "name email")
+      .populate("reviewer", "name email")
+      .sort({ scheduledAt: 1 })
+      .lean();
+
+    // Format response
+    const formatted = upcomingReviews.map((r) => ({
+      _id: r._id,
+      reviewer: r.reviewer,
+      advisor: r.advisor,
+      scheduledAt: r.scheduledAt,
+      status: r.status,
+      mode: r.mode,
+      meetingLink: r.meetingLink,
+      location: r.location,
+      week: r.week,
+    }));
+
+    res.status(200).json({ upcomingReviews: formatted });
+  } catch (err) {
+    console.error("STUDENT UPCOMING REVIEWS ERROR:", err);
+    res.status(500).json({ message: "Failed to fetch upcoming reviews" });
+  }
+};
+
+/* ======================================================
+   GET STUDENT REVIEW HISTORY
+====================================================== */
+exports.getStudentReviewHistory = async (req, res) => {
+  try {
+    const studentId = new mongoose.Types.ObjectId(req.user.id);
+
+    // Fetch completed reviews
+    const completedReviews = await ReviewSession.find({
+      student: studentId,
+      status: "completed",
+    })
+      .populate("reviewer", "name email")
+      .populate("advisor", "name email")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    // Format response with score calculation
+    const formatted = completedReviews.map((r) => ({
+      _id: r._id,
+      reviewer: r.reviewer,
+      advisor: r.advisor,
+      scheduledAt: r.scheduledAt,
+      completedAt: r.updatedAt,
+      status: r.status,
+      marks: r.marks,
+      // Convert marks (0-10) to percentage
+      score: r.marks !== undefined && r.marks !== null ? Math.round(r.marks * 10) : null,
+      feedback: r.feedback,
+      week: r.week,
+    }));
+
+    res.status(200).json({ reviewHistory: formatted });
+  } catch (err) {
+    console.error("STUDENT REVIEW HISTORY ERROR:", err);
+    res.status(500).json({ message: "Failed to fetch review history" });
+  }
+};
+
+/* ======================================================
+   GET STUDENT REVIEW REPORT
+====================================================== */
+exports.getStudentReviewReport = async (req, res) => {
+  try {
+    const studentId = new mongoose.Types.ObjectId(req.user.id);
+    const { reviewId } = req.params;
+
+    // Fetch the review ensuring it belongs to this student
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      student: studentId,
+    })
+      .populate("reviewer", "name email")
+      .populate("advisor", "name email")
+      .populate("student", "name email batch course")
+      .lean();
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    // Format report response
+    const report = {
+      _id: review._id,
+      student: review.student,
+      reviewer: review.reviewer,
+      advisor: review.advisor,
+      scheduledAt: review.scheduledAt,
+      completedAt: review.updatedAt,
+      status: review.status,
+      week: review.week,
+      mode: review.mode,
+      marks: review.marks,
+      score: review.marks !== undefined && review.marks !== null ? Math.round(review.marks * 10) : null,
+      feedback: review.feedback,
+    };
+
+    res.status(200).json({ report });
+  } catch (err) {
+    console.error("STUDENT REVIEW REPORT ERROR:", err);
+    res.status(500).json({ message: "Failed to fetch review report" });
+  }
+};
+
+/* ======================================================
+   GET STUDENT PROGRESS DATA
+====================================================== */
+exports.getStudentProgress = async (req, res) => {
+  try {
+    const studentId = new mongoose.Types.ObjectId(req.user.id);
+
+    // Fetch all reviews for this student
+    const allReviews = await ReviewSession.find({ student: studentId })
+      .populate("reviewer", "name")
+      .sort({ scheduledAt: 1 })
+      .lean();
+
+    // Total reviews and completed count
+    const totalReviews = allReviews.length;
+    const completedReviews = allReviews.filter(r => r.status === "completed");
+    const completedCount = completedReviews.length;
+
+    // Calculate average score (marks are 0-10, convert to percentage)
+    const reviewsWithMarks = completedReviews.filter(
+      r => r.marks !== undefined && r.marks !== null
+    );
+    const avgScore = reviewsWithMarks.length > 0
+      ? Math.round(reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / reviewsWithMarks.length * 10)
+      : 0;
+
+    // Overall progress percentage (completed / total * 100)
+    const overallProgress = totalReviews > 0
+      ? Math.round((completedCount / totalReviews) * 100)
+      : 0;
+
+    // Progress over time (weekly scores)
+    const weeklyProgress = allReviews
+      .filter(r => r.status === "completed" && r.marks !== undefined)
+      .map(r => ({
+        week: r.week,
+        score: Math.round(r.marks * 10),
+        date: r.scheduledAt,
+      }))
+      .sort((a, b) => a.week - b.week);
+
+    // Learning milestones (all reviews as milestones)
+    const milestones = allReviews.map(r => ({
+      _id: r._id,
+      title: `Week ${r.week} Review`,
+      date: r.scheduledAt,
+      status: r.status,
+      reviewer: r.reviewer?.name,
+      score: r.marks !== undefined ? Math.round(r.marks * 10) : null,
+    }));
+
+    // Calculate improvement areas from feedback
+    const improvementAreas = [];
+    const uniqueFeedback = new Set();
+
+    completedReviews.forEach(r => {
+      if (r.feedback && r.feedback.trim()) {
+        // Split feedback into sentences and extract actionable items
+        const sentences = r.feedback.split(/[.!?]/).filter(s => s.trim());
+        sentences.forEach(s => {
+          const trimmed = s.trim();
+          if (trimmed.length > 20 && trimmed.length < 100 && !uniqueFeedback.has(trimmed)) {
+            uniqueFeedback.add(trimmed);
+            if (improvementAreas.length < 5) {
+              improvementAreas.push(trimmed);
+            }
+          }
+        });
+      }
+    });
+
+    // If no feedback, add default improvement areas based on low scores
+    if (improvementAreas.length === 0) {
+      const lowScoreReviews = reviewsWithMarks.filter(r => r.marks < 7);
+      if (lowScoreReviews.length > 0) {
+        improvementAreas.push("Focus on areas with lower scores");
+        improvementAreas.push("Review feedback from completed sessions");
+        improvementAreas.push("Practice consistently before reviews");
+      }
+    }
+
+    res.status(200).json({
+      stats: {
+        overallProgress,
+        milestonesCompleted: completedCount,
+        totalMilestones: totalReviews,
+        avgScore,
+      },
+      weeklyProgress,
+      milestones,
+      improvementAreas,
+    });
+  } catch (err) {
+    console.error("STUDENT PROGRESS ERROR:", err);
+    res.status(500).json({ message: "Failed to fetch progress data" });
+  }
+};
