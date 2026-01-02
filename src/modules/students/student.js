@@ -141,6 +141,16 @@ const studentSchema = new mongoose.Schema(
       default: "active",
     },
 
+    resetPasswordToken: {
+      type: String,
+      default: null,
+    },
+
+    resetPasswordExpires: {
+      type: Date,
+      default: null,
+    },
+
     /* -------- ACADEMIC INFO -------- */
 
     advisorId: {

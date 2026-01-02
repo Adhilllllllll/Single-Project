@@ -195,3 +195,137 @@ exports.createNotification = async (data) => {
         throw err;
     }
 };
+
+/* ======================================================
+   ADMIN → SEND BROADCAST NOTIFICATION
+====================================================== */
+const User = require("../users/User");
+const Student = require("../students/student");
+
+exports.sendAdminNotification = async (req, res) => {
+    try {
+        const adminId = new mongoose.Types.ObjectId(req.user.id);
+        const { title, message, recipientGroup } = req.body;
+
+        // Validate required fields
+        if (!title || !message || !recipientGroup) {
+            return res.status(400).json({
+                message: "Title, message, and recipient group are required",
+            });
+        }
+
+        // Validate recipient group
+        const validGroups = ["students", "reviewers", "all_users"];
+        if (!validGroups.includes(recipientGroup)) {
+            return res.status(400).json({
+                message: "Invalid recipient group. Must be: students, reviewers, or all_users",
+            });
+        }
+
+        // Get recipients based on group
+        let recipients = [];
+
+        if (recipientGroup === "students") {
+            const students = await Student.find({ status: "active" }).select("_id").lean();
+            recipients = students.map(s => ({ id: s._id, model: "Student" }));
+        } else if (recipientGroup === "reviewers") {
+            const reviewers = await User.find({ role: "reviewer", status: "active" }).select("_id").lean();
+            recipients = reviewers.map(u => ({ id: u._id, model: "User" }));
+        } else if (recipientGroup === "all_users") {
+            const users = await User.find({ status: "active", role: { $ne: "admin" } }).select("_id").lean();
+            const students = await Student.find({ status: "active" }).select("_id").lean();
+            recipients = [
+                ...users.map(u => ({ id: u._id, model: "User" })),
+                ...students.map(s => ({ id: s._id, model: "Student" })),
+            ];
+        }
+
+        // Create notifications for all recipients
+        const notifications = recipients.map(r => ({
+            recipient: r.id,
+            recipientModel: r.model,
+            senderId: adminId,
+            senderModel: "User",
+            isBroadcast: true,
+            recipientGroup,
+            type: "admin_broadcast",
+            title,
+            message,
+            isRead: false,
+            deliveryStatus: "delivered",
+        }));
+
+        // Store a reference notification for admin tracking
+        const broadcastRef = new Notification({
+            senderId: adminId,
+            senderModel: "User",
+            isBroadcast: true,
+            recipientGroup,
+            type: "admin_broadcast",
+            title,
+            message,
+            deliveryStatus: "delivered",
+            metadata: {
+                recipientCount: recipients.length,
+            },
+        });
+
+        // Insert all notifications
+        if (notifications.length > 0) {
+            await Notification.insertMany(notifications);
+        }
+        await broadcastRef.save();
+
+        res.status(201).json({
+            message: "Notification sent successfully",
+            recipientCount: recipients.length,
+            notification: {
+                id: broadcastRef._id,
+                title,
+                message,
+                recipientGroup,
+                sentAt: broadcastRef.createdAt,
+            },
+        });
+    } catch (err) {
+        console.error("SEND ADMIN NOTIFICATION ERROR:", err);
+        res.status(500).json({ message: "Failed to send notification" });
+    }
+};
+
+/* ======================================================
+   ADMIN → GET SENT NOTIFICATIONS
+====================================================== */
+exports.getAdminSentNotifications = async (req, res) => {
+    try {
+        const adminId = new mongoose.Types.ObjectId(req.user.id);
+
+        // Get broadcast reference notifications (one per broadcast)
+        const notifications = await Notification.find({
+            senderId: adminId,
+            isBroadcast: true,
+            recipient: { $exists: false }, // Only get the reference notification
+        })
+            .sort({ createdAt: -1 })
+            .limit(50)
+            .lean();
+
+        // Format for frontend
+        const formatted = notifications.map(n => ({
+            id: n._id,
+            title: n.title,
+            message: n.message,
+            recipientGroup: n.recipientGroup,
+            dateSent: n.createdAt,
+            status: n.deliveryStatus,
+            recipientCount: n.metadata?.recipientCount || 0,
+        }));
+
+        res.status(200).json({
+            notifications: formatted,
+        });
+    } catch (err) {
+        console.error("GET ADMIN SENT NOTIFICATIONS ERROR:", err);
+        res.status(500).json({ message: "Failed to fetch sent notifications" });
+    }
+};

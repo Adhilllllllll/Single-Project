@@ -45,3 +45,43 @@ exports.sendUserCredentials = async (toEmail, name, tempPassword) => {
     throw new Error("Email service failed");
   }
 };
+
+/**
+ * Send password reset email
+ */
+exports.sendPasswordResetEmail = async (toEmail, name, resetToken) => {
+  try {
+    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
+
+    await transporter.sendMail({
+      from: `"RMS Admin" <${process.env.SMTP_USER}>`,
+      to: toEmail,
+      subject: "Password Reset Request - RMS",
+      html: `
+        <h3>Hello ${name},</h3>
+        <p>You requested to reset your password.</p>
+
+        <p>Click the link below to reset your password:</p>
+        <p>
+          <a href="${resetUrl}" style="background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;">
+            Reset Password
+          </a>
+        </p>
+
+        <p style="color: #666; font-size: 14px; margin-top: 20px;">
+          This link will expire in <b>1 hour</b>.<br/>
+          If you did not request this, please ignore this email.
+        </p>
+
+        <br/>
+        <p>Regards,<br/>RMS Team</p>
+      `,
+    });
+
+    console.log("📧 Password reset email sent:", toEmail);
+  } catch (err) {
+    console.error("❌ Password reset email failed:", err.message);
+    throw new Error("Email service failed");
+  }
+};
+

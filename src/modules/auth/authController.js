@@ -1,7 +1,9 @@
 const bcrypt = require("bcrypt");
+const crypto = require("crypto");
 const { signAccessToken } = require("../../utils/jwt");
 const User = require("../users/User");
 const Student = require("../students/student");
+const { sendPasswordResetEmail } = require("./emailService");
 
 
 
@@ -94,52 +96,122 @@ exports.login = async (req, res) => {
   }
 };
 
-// /* ======================================================
-//    CHANGE PASSWORD
-//    - Used when mustChangePassword === true
-// ====================================================== */
-// exports.changePassword = async (req, res) => {
-//   try {
-//     const { userId, newPassword } = req.body || {};
+/* ======================================================
+   FORGOT PASSWORD
+   - Sends password reset email with token
+====================================================== */
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body || {};
 
-//     //   Validate input
-//     if (!userId || !newPassword) {
-//       return res.status(400).json({
-//         message: "UserId and new password are required",
-//       });
-//     }
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
 
-//     if (newPassword.length < 8) {
-//       return res.status(400).json({
-//         message: "Password must be at least 8 characters long",
-//       });
-//     }
+    const emailNormalized = email.trim().toLowerCase();
 
-//     //   Find user
-//     const user = await User.findById(userId);
-//     if (!user) {
-//       return res.status(404).json({ message: "User not found" });
-//     }
+    // Find account in User or Student collection
+    let account = await User.findOne({ email: emailNormalized });
 
-//     //  Hash new password
-//     const hashedPassword = await bcrypt.hash(newPassword, 10);
+    if (!account) {
+      account = await Student.findOne({ email: emailNormalized });
+    }
 
-//     //  Update user
-//     user.passwordHash = hashedPassword;
-//     user.mustChangePassword = false;
-//     user.passwordChangedAt = new Date();
-//     user.passwordExpiresAt = null;
+    // Always return success (don't reveal if email exists)
+    if (!account) {
+      return res.status(200).json({
+        message: "If an account with that email exists, a reset link has been sent.",
+      });
+    }
 
-//     await user.save();
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
 
-//     return res.json({
-//       message: "Password changed successfully. Please login again.",
-//     });
-//   } catch (err) {
-//     console.error("CHANGE PASSWORD ERROR:", err);
-//     return res.status(500).json({
-//       message: "Server error",
-//       error: err.message,
-//     });
-//   }
-// };
+    // Save token to account (expires in 1 hour)
+    account.resetPasswordToken = resetTokenHash;
+    account.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await account.save();
+
+    // Send reset email
+    try {
+      await sendPasswordResetEmail(account.email, account.name, resetToken);
+    } catch (emailErr) {
+      console.error("Email send failed:", emailErr);
+    }
+
+    return res.status(200).json({
+      message: "If an account with that email exists, a reset link has been sent.",
+    });
+
+  } catch (err) {
+    console.error("FORGOT PASSWORD ERROR:", err);
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+/* ======================================================
+   RESET PASSWORD
+   - Validates token and sets new password
+====================================================== */
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        message: "Token and new password are required",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    // Hash the token to match stored hash
+    const resetTokenHash = crypto.createHash("sha256").update(token).digest("hex");
+
+    // Find account with valid token
+    let account = await User.findOne({
+      resetPasswordToken: resetTokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    });
+
+    if (!account) {
+      account = await Student.findOne({
+        resetPasswordToken: resetTokenHash,
+        resetPasswordExpires: { $gt: new Date() },
+      });
+    }
+
+    if (!account) {
+      return res.status(400).json({
+        message: "Invalid or expired reset token",
+      });
+    }
+
+    // Update password
+    account.passwordHash = await bcrypt.hash(newPassword, 10);
+    account.resetPasswordToken = undefined;
+    account.resetPasswordExpires = undefined;
+    account.mustChangePassword = false;
+    account.passwordChangedAt = new Date();
+    await account.save();
+
+    return res.status(200).json({
+      message: "Password reset successful. Please login with your new password.",
+    });
+
+  } catch (err) {
+    console.error("RESET PASSWORD ERROR:", err);
+    return res.status(500).json({
+      message: "Server error",
+    });
+  }
+};

@@ -128,3 +128,231 @@ exports.createUser = async (req, res) => {
     });
   }
 };
+
+/**
+ * Get all users with optional role filter
+ * GET /api/admin/users?role=advisor|reviewer|student
+ */
+exports.getAllUsers = async (req, res) => {
+  try {
+    const { role, search, status } = req.query;
+
+    let users = [];
+    let students = [];
+
+    // Build query filters
+    const userQuery = { role: { $ne: "admin" } };
+    const studentQuery = {};
+
+    if (status) {
+      userQuery.status = status;
+      studentQuery.status = status;
+    }
+
+    // Get users based on role filter
+    if (!role || role === "advisor" || role === "reviewer") {
+      if (role) {
+        userQuery.role = role;
+      }
+      users = await User.find(userQuery)
+        .select("_id name email role domain status avatar createdAt")
+        .sort({ createdAt: -1 })
+        .lean();
+    }
+
+    if (!role || role === "student") {
+      students = await Student.find(studentQuery)
+        .select("_id name email batch course status avatar advisorId createdAt")
+        .populate("advisorId", "name")
+        .sort({ createdAt: -1 })
+        .lean();
+
+      // Format students to match user structure
+      students = students.map(s => ({
+        _id: s._id,
+        name: s.name,
+        email: s.email,
+        role: "student",
+        domain: s.course || s.batch,
+        status: s.status,
+        avatar: s.avatar,
+        advisorName: s.advisorId?.name,
+        createdAt: s.createdAt,
+        isStudent: true,
+      }));
+    }
+
+    // Combine and apply search filter
+    let allUsers = [...users.map(u => ({ ...u, isStudent: false })), ...students];
+
+    if (search) {
+      const searchLower = search.toLowerCase();
+      allUsers = allUsers.filter(
+        u =>
+          u.name.toLowerCase().includes(searchLower) ||
+          u.email.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Sort by creation date (newest first)
+    allUsers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    res.json({ users: allUsers });
+  } catch (err) {
+    console.error("Get all users error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Get single user by ID
+ * GET /api/admin/users/:id
+ */
+exports.getUserById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query; // 'student' or 'user'
+
+    let user;
+
+    if (type === "student") {
+      user = await Student.findById(id)
+        .populate("advisorId", "name email")
+        .lean();
+      if (user) {
+        user.role = "student";
+        user.isStudent = true;
+      }
+    } else {
+      user = await User.findById(id).lean();
+      if (user) {
+        user.isStudent = false;
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ user });
+  } catch (err) {
+    console.error("Get user by ID error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Update user details
+ * PATCH /api/admin/users/:id
+ */
+exports.updateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query; // 'student' or 'user'
+    const { name, domain, phone, batch, course } = req.body;
+
+    let user;
+    const updateData = {};
+
+    if (name) updateData.name = name.trim();
+    if (phone) updateData.phone = phone.trim();
+
+    if (type === "student") {
+      if (batch) updateData.batch = batch.trim();
+      if (course) updateData.course = course.trim();
+
+      user = await Student.findByIdAndUpdate(id, updateData, { new: true }).lean();
+      if (user) {
+        user.role = "student";
+      }
+    } else {
+      if (domain) updateData.domain = domain.trim();
+
+      user = await User.findByIdAndUpdate(id, updateData, { new: true }).lean();
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+      message: "User updated successfully",
+      user,
+    });
+  } catch (err) {
+    console.error("Update user error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Toggle user status (active/inactive)
+ * PATCH /api/admin/users/:id/status
+ */
+exports.toggleUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query; // 'student' or 'user'
+
+    let user;
+
+    if (type === "student") {
+      user = await Student.findById(id);
+    } else {
+      user = await User.findById(id);
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Toggle status
+    user.status = user.status === "active" ? "inactive" : "active";
+    await user.save();
+
+    res.json({
+      message: `User ${user.status === "active" ? "activated" : "deactivated"} successfully`,
+      status: user.status,
+    });
+  } catch (err) {
+    console.error("Toggle user status error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Delete user
+ * DELETE /api/admin/users/:id
+ */
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type } = req.query; // 'student' or 'user'
+
+    let user;
+
+    if (type === "student") {
+      user = await Student.findByIdAndDelete(id);
+    } else {
+      user = await User.findById(id);
+
+      // Prevent deleting admin users
+      if (user && user.role === "admin") {
+        return res.status(403).json({ message: "Cannot delete admin users" });
+      }
+
+      if (user) {
+        await User.findByIdAndDelete(id);
+      }
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    console.error("Delete user error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};

@@ -5,12 +5,32 @@ const notificationSchema = new mongoose.Schema(
         recipient: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
-            required: true,
+            required: function () { return !this.isBroadcast; }, // Not required for broadcast
         },
         recipientModel: {
             type: String,
             enum: ["User", "Student"],
             default: "User",
+        },
+        // Admin sender tracking
+        senderId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+        },
+        senderModel: {
+            type: String,
+            enum: ["User", "System"],
+            default: "System",
+        },
+        // Broadcast notification fields
+        isBroadcast: {
+            type: Boolean,
+            default: false,
+        },
+        recipientGroup: {
+            type: String,
+            enum: ["students", "reviewers", "all_users", null],
+            default: null,
         },
         type: {
             type: String,
@@ -26,6 +46,7 @@ const notificationSchema = new mongoose.Schema(
                 "info",
                 "success",
                 "warning",
+                "admin_broadcast", // New type for admin broadcasts
             ],
             required: true,
         },
@@ -48,6 +69,12 @@ const notificationSchema = new mongoose.Schema(
             taskId: mongoose.Schema.Types.ObjectId,
             senderId: mongoose.Schema.Types.ObjectId,
         },
+        // Delivery status for admin tracking
+        deliveryStatus: {
+            type: String,
+            enum: ["pending", "delivered", "failed"],
+            default: "delivered",
+        },
     },
     { timestamps: true }
 );
@@ -55,5 +82,8 @@ const notificationSchema = new mongoose.Schema(
 // Indexes for efficient querying
 notificationSchema.index({ recipient: 1, isRead: 1 });
 notificationSchema.index({ recipient: 1, createdAt: -1 });
+notificationSchema.index({ senderId: 1, createdAt: -1 }); // For admin sent notifications
+notificationSchema.index({ isBroadcast: 1, recipientGroup: 1 }); // For broadcast queries
 
 module.exports = mongoose.model("Notification", notificationSchema);
+

@@ -47,4 +47,23 @@ router.delete(
     notificationController.deleteNotification
 );
 
+/* =======================
+   ADMIN - SEND NOTIFICATION
+======================= */
+router.post(
+    "/admin/send",
+    authMiddleware("admin"),
+    notificationController.sendAdminNotification
+);
+
+/* =======================
+   ADMIN - GET SENT NOTIFICATIONS
+======================= */
+router.get(
+    "/admin/sent",
+    authMiddleware("admin"),
+    notificationController.getAdminSentNotifications
+);
+
 module.exports = router;
+
