@@ -9,11 +9,26 @@ const reviewerAvailabilitySchema = new mongoose.Schema(
       index: true,
     },
 
+    // Type of availability: recurring (weekly) or specific (date-based)
+    availabilityType: {
+      type: String,
+      enum: ["recurring", "specific"],
+      default: "recurring",
+    },
+
+    // For recurring slots (dayOfWeek-based)
     dayOfWeek: {
       type: Number, // 0 = Sunday, 6 = Saturday
-      required: true,
       min: 0,
       max: 6,
+      required: function () { return this.availabilityType === "recurring"; },
+    },
+
+    // For specific date slots
+    specificDate: {
+      type: Date,
+      required: function () { return this.availabilityType === "specific"; },
+      index: true,
     },
 
     startTime: {

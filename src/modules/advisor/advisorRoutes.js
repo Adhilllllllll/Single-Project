@@ -45,4 +45,11 @@ router.get(
   advisorController.getReviewersWithAvailability
 );
 
+// Get comprehensive analytics data
+router.get(
+  "/analytics",
+  authMiddleware("advisor"),
+  advisorController.getAnalytics
+);
+
 module.exports = router;

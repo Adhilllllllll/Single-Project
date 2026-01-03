@@ -2,7 +2,15 @@ const router = require("express").Router();
 const availabilityController = require("./availabilityController");
 const authMiddleware = require("../../middlewares/authMiddleware");
 
-// Reviewer only
+// ========== ADVISOR ROUTES ==========
+// Get availability for a specific date (for scheduling)
+router.get(
+  "/by-date",
+  authMiddleware("advisor"),
+  availabilityController.getAvailabilityByDate
+);
+
+// ========== REVIEWER ROUTES ==========
 
 // Get all availability (slots + breaks) for Weekly Grid
 router.get(

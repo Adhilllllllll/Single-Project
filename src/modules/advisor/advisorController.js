@@ -295,3 +295,194 @@ exports.getReviewersWithAvailability = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/advisor/analytics
+ * Comprehensive analytics with real data from MongoDB
+ */
+exports.getAnalytics = async (req, res) => {
+  try {
+    const advisorId = req.user.id;
+    const now = new Date();
+
+    // ========== STUDENT METRICS ==========
+    const totalStudents = await Student.countDocuments({
+      advisorId,
+      status: "active"
+    });
+
+    // Get students with progress
+    const students = await Student.find({ advisorId, status: "active" }).select("progress");
+    const avgStudentProgress = students.length > 0
+      ? Math.round(students.reduce((sum, s) => sum + (s.progress || 0), 0) / students.length)
+      : 0;
+
+    // ========== REVIEW METRICS ==========
+    // Total reviews created by this advisor
+    const totalReviews = await ReviewSession.countDocuments({ advisor: advisorId });
+
+    // Reviews by status
+    const completedReviews = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      status: "completed"
+    });
+    const pendingReviews = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      status: "pending"
+    });
+    const scheduledReviews = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      status: "scheduled"
+    });
+    const cancelledReviews = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      status: "cancelled"
+    });
+
+    // Completion rate
+    const completionRate = totalReviews > 0
+      ? Math.round((completedReviews / totalReviews) * 100)
+      : 0;
+
+    // ========== SCORE METRICS ==========
+    const reviewsWithScores = await ReviewSession.find({
+      advisor: advisorId,
+      status: "completed",
+      totalScore: { $exists: true, $ne: null }
+    }).select("totalScore");
+
+    const avgScore = reviewsWithScores.length > 0
+      ? Math.round(reviewsWithScores.reduce((sum, r) => sum + (r.totalScore || 0), 0) / reviewsWithScores.length)
+      : 0;
+
+    // ========== THIS WEEK METRICS ==========
+    const dayOfWeek = now.getDay();
+    const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - diffToMonday);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 7);
+
+    const reviewsThisWeek = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      scheduledAt: { $gte: weekStart, $lt: weekEnd }
+    });
+
+    // ========== THIS MONTH METRICS ==========
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    const reviewsThisMonth = await ReviewSession.countDocuments({
+      advisor: advisorId,
+      scheduledAt: { $gte: monthStart, $lte: monthEnd }
+    });
+
+    // ========== MONTHLY TREND (Last 6 months) ==========
+    const monthlyTrend = [];
+    for (let i = 5; i >= 0; i--) {
+      const startDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+      const count = await ReviewSession.countDocuments({
+        advisor: advisorId,
+        scheduledAt: { $gte: startDate, $lte: endDate }
+      });
+
+      const completedCount = await ReviewSession.countDocuments({
+        advisor: advisorId,
+        status: "completed",
+        scheduledAt: { $gte: startDate, $lte: endDate }
+      });
+
+      monthlyTrend.push({
+        month: startDate.toLocaleString('default', { month: 'short' }),
+        year: startDate.getFullYear(),
+        total: count,
+        completed: completedCount,
+      });
+    }
+
+    // ========== REVIEWER PERFORMANCE ==========
+    const reviewerStats = await ReviewSession.aggregate([
+      { $match: { advisor: advisorId } },
+      {
+        $group: {
+          _id: "$reviewer",
+          totalReviews: { $sum: 1 },
+          completedReviews: {
+            $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] }
+          },
+          avgScore: {
+            $avg: {
+              $cond: [
+                { $and: [{ $eq: ["$status", "completed"] }, { $ne: ["$totalScore", null] }] },
+                "$totalScore",
+                null
+              ]
+            }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "reviewerInfo"
+        }
+      },
+      { $unwind: { path: "$reviewerInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          name: { $ifNull: ["$reviewerInfo.name", "Unknown"] },
+          totalReviews: 1,
+          completedReviews: 1,
+          completionRate: {
+            $cond: [
+              { $gt: ["$totalReviews", 0] },
+              { $multiply: [{ $divide: ["$completedReviews", "$totalReviews"] }, 100] },
+              0
+            ]
+          },
+          avgScore: { $round: [{ $ifNull: ["$avgScore", 0] }, 0] }
+        }
+      },
+      { $sort: { completedReviews: -1 } },
+      { $limit: 10 }
+    ]);
+
+    return res.json({
+      message: "Analytics data fetched",
+      analytics: {
+        // Summary Cards
+        totalStudents,
+        avgStudentProgress,
+        totalReviews,
+        completedReviews,
+        pendingReviews,
+        scheduledReviews,
+        cancelledReviews,
+        completionRate,
+        avgScore,
+        reviewsThisWeek,
+        reviewsThisMonth,
+
+        // Charts Data
+        monthlyTrend,
+        reviewerPerformance: reviewerStats,
+
+        // Status Breakdown
+        statusBreakdown: {
+          completed: completedReviews,
+          pending: pendingReviews,
+          scheduled: scheduledReviews,
+          cancelled: cancelledReviews,
+        }
+      }
+    });
+  } catch (err) {
+    console.error("GET ANALYTICS ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};

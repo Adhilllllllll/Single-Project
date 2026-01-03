@@ -203,7 +203,7 @@ exports.rescheduleReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
     const advisorId = req.user.id;
-    const { scheduledAt, notifyParticipants } = req.body;
+    const { scheduledAt, reviewerId, notifyParticipants } = req.body;
 
     if (!scheduledAt) {
       return res.status(400).json({ message: "New date/time is required" });
@@ -224,9 +224,17 @@ exports.rescheduleReview = async (req, res) => {
       });
     }
 
+    // Update reviewer if provided
+    if (reviewerId && reviewerId !== review.reviewer?.toString()) {
+      review.reviewer = reviewerId;
+    }
+
     review.scheduledAt = new Date(scheduledAt);
     review.status = "scheduled";
     await review.save();
+
+    // Populate reviewer for response
+    await review.populate("reviewer", "name email");
 
     // TODO: Send notifications if notifyParticipants is true
 
@@ -236,6 +244,7 @@ exports.rescheduleReview = async (req, res) => {
         id: review._id,
         scheduledAt: review.scheduledAt,
         status: review.status,
+        reviewer: review.reviewer,
       }
     });
   } catch (err) {

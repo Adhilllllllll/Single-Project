@@ -1,22 +1,29 @@
 const ReviewerAvailability = require("./ReviewerAvailability");
 const User = require("../users/User");
+const ReviewSession = require("../reviews/reviewSession");
 
 /* ======================================================
    CREATE AVAILABILITY (Reviewer only)
+   Supports both recurring (weekly) and specific date slots
 ====================================================== */
 exports.createAvailability = async (req, res) => {
   try {
     const reviewerId = req.user.id;
-    const { dayOfWeek, startTime, endTime, isRecurring, notes } = req.body;
+    const { availabilityType = "recurring", dayOfWeek, specificDate, startTime, endTime, isRecurring, notes } = req.body;
 
-    if (
-      dayOfWeek === undefined ||
-      !startTime ||
-      !endTime
-    ) {
-      return res.status(400).json({
-        message: "dayOfWeek, startTime and endTime are required",
-      });
+    // Validate required fields based on type
+    if (availabilityType === "recurring") {
+      if (dayOfWeek === undefined || !startTime || !endTime) {
+        return res.status(400).json({
+          message: "dayOfWeek, startTime and endTime are required for recurring slots",
+        });
+      }
+    } else if (availabilityType === "specific") {
+      if (!specificDate || !startTime || !endTime) {
+        return res.status(400).json({
+          message: "specificDate, startTime and endTime are required for specific date slots",
+        });
+      }
     }
 
     if (startTime >= endTime) {
@@ -25,14 +32,39 @@ exports.createAvailability = async (req, res) => {
       });
     }
 
-    const slot = await ReviewerAvailability.create({
+    // Check for overlapping slots
+    const query = { reviewerId, startTime: { $lt: endTime }, endTime: { $gt: startTime } };
+    if (availabilityType === "recurring") {
+      query.availabilityType = "recurring";
+      query.dayOfWeek = dayOfWeek;
+    } else {
+      query.availabilityType = "specific";
+      query.specificDate = new Date(specificDate);
+    }
+
+    const existingSlot = await ReviewerAvailability.findOne(query);
+    if (existingSlot) {
+      return res.status(409).json({
+        message: "Overlapping slot exists for this time",
+      });
+    }
+
+    const slotData = {
       reviewerId,
-      dayOfWeek,
+      availabilityType,
       startTime,
       endTime,
-      isRecurring,
+      isRecurring: availabilityType === "recurring",
       notes,
-    });
+    };
+
+    if (availabilityType === "recurring") {
+      slotData.dayOfWeek = dayOfWeek;
+    } else {
+      slotData.specificDate = new Date(specificDate);
+    }
+
+    const slot = await ReviewerAvailability.create(slotData);
 
     return res.status(201).json({
       message: "Availability created",
@@ -59,13 +91,113 @@ exports.getMyAvailability = async (req, res) => {
     const reviewerId = req.user.id;
 
     const slots = await ReviewerAvailability.find({ reviewerId }).sort({
+      availabilityType: 1,
       dayOfWeek: 1,
+      specificDate: 1,
       startTime: 1,
     });
 
-    return res.json(slots);
+    // Separate by type
+    const recurring = slots.filter(s => s.availabilityType === "recurring");
+    const specific = slots.filter(s => s.availabilityType === "specific");
+
+    return res.json({
+      recurring,
+      specific,
+      all: slots,
+    });
   } catch (err) {
     console.error("Get Availability Error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* ======================================================
+   GET AVAILABILITY BY DATE (For Advisor scheduling)
+   Returns available slots for a specific date
+   Filters out slots that already have a scheduled review
+====================================================== */
+exports.getAvailabilityByDate = async (req, res) => {
+  try {
+    const { date, reviewerId } = req.query;
+
+    if (!date) {
+      return res.status(400).json({ message: "Date is required" });
+    }
+
+    const targetDate = new Date(date);
+    const dayOfWeek = targetDate.getDay(); // 0-6
+
+    // Create date range for the target date (start and end of day)
+    const dayStart = new Date(targetDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(targetDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    // Build query for availability
+    const query = {
+      status: "active",
+      slotType: "slot",
+      $or: [
+        // Recurring slots for this day of week
+        { availabilityType: "recurring", dayOfWeek },
+        // Specific date slots for this exact date
+        {
+          availabilityType: "specific",
+          specificDate: { $gte: dayStart, $lte: dayEnd },
+        },
+      ],
+    };
+
+    if (reviewerId) {
+      query.reviewerId = reviewerId;
+    }
+
+    const slots = await ReviewerAvailability.find(query)
+      .populate("reviewerId", "name email domain avatar")
+      .sort({ startTime: 1 });
+
+    // Get all scheduled/pending reviews for this date to filter out booked slots
+    const existingReviews = await ReviewSession.find({
+      scheduledAt: { $gte: dayStart, $lte: dayEnd },
+      status: { $in: ["scheduled", "pending"] },
+    }).select("reviewer scheduledAt");
+
+    // Get current time for filtering out past slots
+    const now = new Date();
+    const currentTimeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const isToday = dayStart.toDateString() === now.toDateString();
+
+    // Filter out slots that are already booked OR have already passed (for today)
+    const availableSlots = slots.filter((slot) => {
+      // If target date is today, exclude slots where start time has passed
+      if (isToday && slot.startTime <= currentTimeStr) {
+        return false;
+      }
+
+      // Check if this slot's time is already booked for this reviewer
+      const slotReviewerId = slot.reviewerId?._id?.toString() || slot.reviewerId?.toString();
+
+      const isBooked = existingReviews.some((review) => {
+        const reviewReviewerId = review.reviewer?.toString();
+        if (slotReviewerId !== reviewReviewerId) return false;
+
+        // Compare times - the review is at scheduledAt time
+        const reviewTime = new Date(review.scheduledAt);
+        const reviewHour = reviewTime.getHours();
+        const reviewMinutes = reviewTime.getMinutes();
+        const reviewTimeStr = `${String(reviewHour).padStart(2, "0")}:${String(reviewMinutes).padStart(2, "0")}`;
+
+        // Check if review time falls within slot time
+        return reviewTimeStr >= slot.startTime && reviewTimeStr < slot.endTime;
+      });
+
+      return !isBooked;
+    });
+
+    return res.json(availableSlots);
+  } catch (err) {
+    console.error("Get Availability By Date Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
