@@ -2,12 +2,15 @@ const router = require("express").Router();
 const notificationController = require("./notificationController");
 const authMiddleware = require("../../middlewares/authMiddleware");
 
+// Allow all user roles to access notifications
+const anyUserAuth = authMiddleware(["student", "advisor", "reviewer"]);
+
 /* =======================
    GET NOTIFICATIONS
 ======================= */
 router.get(
     "/",
-    authMiddleware("student"),
+    anyUserAuth,
     notificationController.getNotifications
 );
 
@@ -16,7 +19,7 @@ router.get(
 ======================= */
 router.get(
     "/unread-count",
-    authMiddleware("student"),
+    anyUserAuth,
     notificationController.getUnreadCount
 );
 
@@ -25,7 +28,7 @@ router.get(
 ======================= */
 router.patch(
     "/:notificationId/read",
-    authMiddleware("student"),
+    anyUserAuth,
     notificationController.markAsRead
 );
 
@@ -34,7 +37,7 @@ router.patch(
 ======================= */
 router.patch(
     "/read-all",
-    authMiddleware("student"),
+    anyUserAuth,
     notificationController.markAllAsRead
 );
 
@@ -43,7 +46,7 @@ router.patch(
 ======================= */
 router.delete(
     "/:notificationId",
-    authMiddleware("student"),
+    anyUserAuth,
     notificationController.deleteNotification
 );
 

@@ -215,10 +215,10 @@ exports.sendAdminNotification = async (req, res) => {
         }
 
         // Validate recipient group
-        const validGroups = ["students", "reviewers", "all_users"];
+        const validGroups = ["students", "reviewers", "advisors", "all_users"];
         if (!validGroups.includes(recipientGroup)) {
             return res.status(400).json({
-                message: "Invalid recipient group. Must be: students, reviewers, or all_users",
+                message: "Invalid recipient group. Must be: students, reviewers, advisors, or all_users",
             });
         }
 
@@ -231,6 +231,9 @@ exports.sendAdminNotification = async (req, res) => {
         } else if (recipientGroup === "reviewers") {
             const reviewers = await User.find({ role: "reviewer", status: "active" }).select("_id").lean();
             recipients = reviewers.map(u => ({ id: u._id, model: "User" }));
+        } else if (recipientGroup === "advisors") {
+            const advisors = await User.find({ role: "advisor", status: "active" }).select("_id").lean();
+            recipients = advisors.map(u => ({ id: u._id, model: "User" }));
         } else if (recipientGroup === "all_users") {
             const users = await User.find({ status: "active", role: { $ne: "admin" } }).select("_id").lean();
             const students = await Student.find({ status: "active" }).select("_id").lean();

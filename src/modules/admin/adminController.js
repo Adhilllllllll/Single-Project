@@ -1,8 +1,33 @@
 const User = require("../users/User");
 const Student = require("../students/student");
+const ReviewSession = require("../reviews/reviewSession");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const { sendUserCredentials } = require("../auth/emailService");
+
+/**
+ * GET /api/admin/me
+ * Get logged-in admin's profile
+ */
+exports.getMyProfile = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+
+    const admin = await User.findById(adminId).select("-passwordHash");
+
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    return res.json({
+      message: "Admin profile fetched",
+      admin,
+    });
+  } catch (err) {
+    console.error("GET ADMIN PROFILE ERROR:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
 exports.getDashboardCounts = async (req, res) => {
   try {
@@ -15,6 +40,151 @@ exports.getDashboardCounts = async (req, res) => {
     res.json({ students, reviewers, advisors });
   } catch (err) {
     console.error("Admin counts error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * GET /api/admin/review-stats
+ * Get comprehensive review statistics for admin dashboard
+ */
+exports.getReviewStats = async (req, res) => {
+  try {
+    const now = new Date();
+
+    // ========== STATUS COUNTS ==========
+    const [scheduled, inProgress, completed, cancelled, total] = await Promise.all([
+      ReviewSession.countDocuments({ status: "scheduled" }),
+      ReviewSession.countDocuments({ status: { $in: ["pending", "in-progress"] } }),
+      ReviewSession.countDocuments({ status: "completed" }),
+      ReviewSession.countDocuments({ status: "cancelled" }),
+      ReviewSession.countDocuments(),
+    ]);
+
+    // Calculate completion rate change (compare last 30 days vs previous 30 days)
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+    const [recentCompleted, previousCompleted] = await Promise.all([
+      ReviewSession.countDocuments({
+        status: "completed",
+        updatedAt: { $gte: thirtyDaysAgo },
+      }),
+      ReviewSession.countDocuments({
+        status: "completed",
+        updatedAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo },
+      }),
+    ]);
+
+    const completionTrend = previousCompleted > 0
+      ? Math.round(((recentCompleted - previousCompleted) / previousCompleted) * 100)
+      : recentCompleted > 0 ? 100 : 0;
+
+    // ========== MONTHLY TREND (Last 6 months) ==========
+    const monthlyTrend = [];
+    for (let i = 5; i >= 0; i--) {
+      const startDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+
+      const [monthCompleted, monthInProgress, monthScheduled] = await Promise.all([
+        ReviewSession.countDocuments({
+          status: "completed",
+          scheduledAt: { $gte: startDate, $lte: endDate },
+        }),
+        ReviewSession.countDocuments({
+          status: { $in: ["pending", "in-progress"] },
+          scheduledAt: { $gte: startDate, $lte: endDate },
+        }),
+        ReviewSession.countDocuments({
+          status: "scheduled",
+          scheduledAt: { $gte: startDate, $lte: endDate },
+        }),
+      ]);
+
+      monthlyTrend.push({
+        month: startDate.toLocaleString("default", { month: "short" }),
+        completed: monthCompleted,
+        inProgress: monthInProgress,
+        scheduled: monthScheduled,
+      });
+    }
+
+    // ========== REVIEWS BY DOMAIN/DEPARTMENT ==========
+    // Get reviews grouped by reviewer domain
+    const reviewsByDomain = await ReviewSession.aggregate([
+      {
+        $lookup: {
+          from: "users",
+          localField: "reviewer",
+          foreignField: "_id",
+          as: "reviewerInfo",
+        },
+      },
+      { $unwind: { path: "$reviewerInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $group: {
+          _id: { $ifNull: ["$reviewerInfo.domain", "General"] },
+          totalReviews: { $sum: 1 },
+          completed: {
+            $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] },
+          },
+          pending: {
+            $sum: {
+              $cond: [
+                { $in: ["$status", ["scheduled", "pending", "in-progress"]] },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          department: "$_id",
+          totalReviews: 1,
+          completed: 1,
+          pending: 1,
+          completionRate: {
+            $cond: [
+              { $gt: ["$totalReviews", 0] },
+              { $round: [{ $multiply: [{ $divide: ["$completed", "$totalReviews"] }, 100] }, 0] },
+              0,
+            ],
+          },
+        },
+      },
+      { $sort: { totalReviews: -1 } },
+      { $limit: 10 },
+    ]);
+
+    // ========== STATUS DISTRIBUTION (percentages) ==========
+    const statusDistribution = {
+      completed: total > 0 ? Math.round((completed / total) * 100) : 0,
+      inProgress: total > 0 ? Math.round((inProgress / total) * 100) : 0,
+      scheduled: total > 0 ? Math.round((scheduled / total) * 100) : 0,
+      cancelled: total > 0 ? Math.round((cancelled / total) * 100) : 0,
+    };
+
+    return res.json({
+      message: "Review stats fetched",
+      stats: {
+        // Summary cards
+        scheduled,
+        inProgress,
+        completed,
+        cancelled,
+        total,
+        completionTrend,
+
+        // Charts data
+        statusDistribution,
+        monthlyTrend,
+        reviewsByDomain,
+      },
+    });
+  } catch (err) {
+    console.error("Get Review Stats Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

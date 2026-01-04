@@ -2,10 +2,24 @@ const router = require("express").Router();
 const authMiddleware = require("../../middlewares/authMiddleware");
 const adminController = require("./adminController");
 
+// Get admin profile
+router.get(
+  "/me",
+  authMiddleware("admin"),
+  adminController.getMyProfile
+);
+
 router.get(
   "/dashboard-counts",
   authMiddleware("admin"),
   adminController.getDashboardCounts
+);
+
+// Review statistics for Review Status page
+router.get(
+  "/review-stats",
+  authMiddleware("admin"),
+  adminController.getReviewStats
 );
 
 router.post(

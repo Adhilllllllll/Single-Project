@@ -21,10 +21,22 @@ const authMiddleware = (requiredRole = null) => {
       req.user = decoded; // { id, role }
 
       //  Role-based access control
-      if (requiredRole && decoded.role !== requiredRole) {
-        return res.status(403).json({
-          message: `Access denied: ${requiredRole} only`,
-        });
+      if (requiredRole) {
+        // Handle array of allowed roles
+        if (Array.isArray(requiredRole)) {
+          if (!requiredRole.includes(decoded.role)) {
+            return res.status(403).json({
+              message: `Access denied: requires one of [${requiredRole.join(", ")}]`,
+            });
+          }
+        } else {
+          // Handle single role
+          if (decoded.role !== requiredRole) {
+            return res.status(403).json({
+              message: `Access denied: ${requiredRole} only`,
+            });
+          }
+        }
       }
 
       next();

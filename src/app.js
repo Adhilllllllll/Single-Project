@@ -100,6 +100,9 @@ safeUse("/api/tasks", "./modules/tasks/taskRoutes");
 safeUse("/api/materials", "./modules/materials/materialsRoutes");
 safeUse("/api/notifications", "./modules/notifications/notificationRoutes");
 safeUse("/api/students", "./modules/students/studentRoutes");
+safeUse("/api/chat", "./modules/chat/chatRoutes");
+safeUse("/api/issues", "./modules/issues/issueRoutes");
+
 /* =======================
    HEALTH CHECK
 ======================= */
