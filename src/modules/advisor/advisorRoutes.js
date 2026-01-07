@@ -1,7 +1,8 @@
 const router = require("express").Router();
 const authMiddleware = require("../../middlewares/authMiddleware");
 const advisorController = require("./advisorController");
-const { uploadAvatar } = require("../../middlewares/upload");
+const notesTemplatesController = require("./notesTemplatesController");
+const { uploadAvatar, uploadMaterial } = require("../../middlewares/upload");
 
 // Advisor-only routes
 router.get(
@@ -52,4 +53,61 @@ router.get(
   advisorController.getAnalytics
 );
 
+/* ======================================================
+   NOTES ROUTES
+====================================================== */
+router.get(
+  "/notes",
+  authMiddleware("advisor"),
+  notesTemplatesController.getNotes
+);
+
+router.post(
+  "/notes",
+  authMiddleware("advisor"),
+  uploadMaterial.single("attachment"),
+  notesTemplatesController.createNote
+);
+
+router.put(
+  "/notes/:id",
+  authMiddleware("advisor"),
+  uploadMaterial.single("attachment"),
+  notesTemplatesController.updateNote
+);
+
+router.delete(
+  "/notes/:id",
+  authMiddleware("advisor"),
+  notesTemplatesController.deleteNote
+);
+
+/* ======================================================
+   TEMPLATES ROUTES
+====================================================== */
+router.get(
+  "/templates",
+  authMiddleware("advisor"),
+  notesTemplatesController.getTemplates
+);
+
+router.post(
+  "/templates",
+  authMiddleware("advisor"),
+  notesTemplatesController.createTemplate
+);
+
+router.put(
+  "/templates/:id",
+  authMiddleware("advisor"),
+  notesTemplatesController.updateTemplate
+);
+
+router.delete(
+  "/templates/:id",
+  authMiddleware("advisor"),
+  notesTemplatesController.deleteTemplate
+);
+
 module.exports = router;
+

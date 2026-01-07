@@ -236,11 +236,11 @@ exports.getStudentProfile = async (req, res) => {
  */
 exports.getReviewersWithAvailability = async (req, res) => {
   try {
-    // 1. Get all active reviewers
+    // 1. Get all active reviewers (including reviewerStatus)
     const reviewers = await User.find({
       role: "reviewer",
       status: "active"
-    }).select("_id name email domain");
+    }).select("_id name email domain reviewerStatus");
 
     // 2. Get availability for each reviewer
     const reviewersWithAvailability = await Promise.all(
@@ -279,7 +279,8 @@ exports.getReviewersWithAvailability = async (req, res) => {
           availability: availabilityDays,
           slots: slots,
           nextSlot: nextSlotText,
-          status: slots.length > 0 ? "Available" : "No Slots",
+          // Use actual reviewerStatus from User model (available, busy, dnd)
+          status: reviewer.reviewerStatus || "available",
           totalSlots: slots.length,
         };
       })

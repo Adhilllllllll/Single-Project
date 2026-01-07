@@ -31,15 +31,137 @@ exports.getMyProfile = async (req, res) => {
 
 exports.getDashboardCounts = async (req, res) => {
   try {
-    const [students, reviewers, advisors] = await Promise.all([
+    // Get start of today for reviewsToday count
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [students, reviewers, advisors, totalReviews, pendingReviews, reviewsToday] = await Promise.all([
       Student.countDocuments(),
       User.countDocuments({ role: "reviewer" }),
       User.countDocuments({ role: "advisor" }),
+      ReviewSession.countDocuments(),
+      ReviewSession.countDocuments({ status: "pending" }),
+      ReviewSession.countDocuments({ scheduledAt: { $gte: startOfToday } }),
     ]);
 
-    res.json({ students, reviewers, advisors });
+    res.json({
+      students,
+      reviewers,
+      advisors,
+      totalReviews,
+      pendingReviews,
+      reviewsToday,
+    });
   } catch (err) {
     console.error("Admin counts error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * GET /api/admin/recent-activity
+ * Get recent system activity for admin dashboard
+ */
+exports.getRecentActivity = async (req, res) => {
+  try {
+    // Get recent reviews (last 2 weeks)
+    const recentReviews = await ReviewSession.find({})
+      .sort({ createdAt: -1 })
+      .limit(15)
+      .populate("studentId", "name")
+      .populate("reviewerId", "name")
+      .lean();
+
+    // Get recently registered students (last 2 weeks)
+    const recentStudents = await Student.find({})
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select("name createdAt")
+      .lean();
+
+    // Get recently added users (advisors/reviewers)
+    const recentUsers = await User.find({ role: { $in: ["advisor", "reviewer"] } })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select("name role createdAt")
+      .lean();
+
+    // Combine and format activities
+    const activities = [];
+
+    // Add review activities
+    recentReviews.forEach((review) => {
+      let type = "pending";
+      let message = "";
+
+      if (review.status === "completed") {
+        type = "complete";
+        message = `Review for ${review.studentId?.name || "Student"} was completed.`;
+      } else if (review.status === "pending") {
+        type = "pending";
+        message = `Review for ${review.studentId?.name || "Student"} is pending approval.`;
+      } else if (review.status === "accepted") {
+        type = "add";
+        message = `Review for ${review.studentId?.name || "Student"} was scheduled.`;
+      }
+
+      activities.push({
+        id: review._id,
+        type,
+        message,
+        time: review.createdAt,
+      });
+    });
+
+    // Add student registrations
+    recentStudents.forEach((student) => {
+      activities.push({
+        id: student._id,
+        type: "register",
+        message: `New student ${student.name} was registered.`,
+        time: student.createdAt,
+      });
+    });
+
+    // Add user additions
+    recentUsers.forEach((user) => {
+      activities.push({
+        id: user._id,
+        type: "add",
+        message: `New ${user.role} ${user.name} was added.`,
+        time: user.createdAt,
+      });
+    });
+
+    // Sort by time descending and limit to 20
+    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
+    const limitedActivities = activities.slice(0, 20);
+
+    // Format time as relative
+    const formatRelativeTime = (date) => {
+      const now = new Date();
+      const diff = now - new Date(date);
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
+
+      if (minutes < 1) return "Just now";
+      if (minutes < 60) return `${minutes} min ago`;
+      if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
+      if (days === 1) return "Yesterday";
+      return `${days} days ago`;
+    };
+
+    const formattedActivities = limitedActivities.map((act) => ({
+      id: act.id,
+      type: act.type,
+      message: act.message,
+      time: formatRelativeTime(act.time),
+    }));
+
+    res.json({ activities: formattedActivities });
+  } catch (err) {
+    console.error("Recent Activity Error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -332,7 +454,7 @@ exports.getAllUsers = async (req, res) => {
 
     if (!role || role === "student") {
       students = await Student.find(studentQuery)
-        .select("_id name email batch course status avatar advisorId createdAt")
+        .select("_id name email batch course domain status avatar advisorId createdAt")
         .populate("advisorId", "name")
         .sort({ createdAt: -1 })
         .lean();
@@ -343,7 +465,7 @@ exports.getAllUsers = async (req, res) => {
         name: s.name,
         email: s.email,
         role: "student",
-        domain: s.course || s.batch,
+        domain: s.domain || s.course || s.batch || "",
         status: s.status,
         avatar: s.avatar,
         advisorName: s.advisorId?.name,
@@ -430,6 +552,7 @@ exports.updateUser = async (req, res) => {
     if (type === "student") {
       if (batch) updateData.batch = batch.trim();
       if (course) updateData.course = course.trim();
+      if (domain) updateData.domain = domain.trim();
 
       user = await Student.findByIdAndUpdate(id, updateData, { new: true }).lean();
       if (user) {

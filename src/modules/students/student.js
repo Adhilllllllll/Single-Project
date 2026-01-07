@@ -175,6 +175,12 @@ const studentSchema = new mongoose.Schema(
       trim: true,
     },
 
+    domain: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
     /* -------- PROFILE -------- */
 
     avatar: {

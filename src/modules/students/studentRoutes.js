@@ -4,6 +4,15 @@ const authMiddleware = require("../../middlewares/authMiddleware");
 const { uploadAvatar, uploadDocument } = require("../../middlewares/upload");
 
 /* =======================
+   DASHBOARD
+======================= */
+router.get(
+    "/dashboard",
+    authMiddleware("student"),
+    studentProfileController.getDashboard
+);
+
+/* =======================
    PROFILE
 ======================= */
 router.get(

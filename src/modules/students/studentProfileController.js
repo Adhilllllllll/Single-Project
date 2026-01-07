@@ -2,6 +2,111 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const Student = require("./student");
 const ReviewSession = require("../reviews/reviewSession");
+const Task = require("../tasks/Task");
+const User = require("../users/User");
+
+/* ======================================================
+   GET STUDENT DASHBOARD (GET /api/students/dashboard)
+====================================================== */
+exports.getDashboard = async (req, res) => {
+    try {
+        const studentId = new mongoose.Types.ObjectId(req.user.id);
+
+        // Get student info
+        const student = await Student.findById(studentId)
+            .populate("advisorId", "name")
+            .lean();
+
+        if (!student) {
+            return res.status(404).json({ message: "Student not found" });
+        }
+
+        // Stats calculations
+        const [
+            upcomingReviewsCount,
+            pendingTasksCount,
+            totalReviews,
+            completedReviews,
+        ] = await Promise.all([
+            // Count upcoming reviews (scheduled, not completed)
+            ReviewSession.countDocuments({
+                studentId: studentId,
+                status: { $in: ["pending", "accepted", "scheduled"] },
+                date: { $gte: new Date() },
+            }),
+            // Count pending tasks
+            Task.countDocuments({
+                studentId: studentId,
+                status: { $in: ["pending", "in-progress"] },
+            }),
+            // Total reviews for this student
+            ReviewSession.countDocuments({ studentId: studentId }),
+            // Completed reviews with scores
+            ReviewSession.find({
+                studentId: studentId,
+                status: "completed",
+            }).select("score feedback reviewerId date").populate("reviewerId", "name").lean(),
+        ]);
+
+        // Calculate average score and overall progress
+        let avgScore = 0;
+        if (completedReviews.length > 0) {
+            const totalScore = completedReviews.reduce((sum, r) => sum + (r.score || 0), 0);
+            avgScore = Math.round(totalScore / completedReviews.length);
+        }
+        const overallProgress = totalReviews > 0
+            ? Math.round((completedReviews.length / totalReviews) * 100)
+            : 0;
+
+        // Get upcoming reviews list (next 5)
+        const upcomingReviews = await ReviewSession.find({
+            studentId: studentId,
+            status: { $in: ["pending", "accepted", "scheduled"] },
+            date: { $gte: new Date() },
+        })
+            .sort({ date: 1 })
+            .limit(5)
+            .populate("reviewerId", "name")
+            .lean();
+
+        // Format upcoming reviews
+        const formattedUpcoming = upcomingReviews.map(r => ({
+            id: r._id,
+            reviewerName: r.reviewerId?.name || "TBD",
+            advisorName: student.advisorId?.name || "N/A",
+            date: r.date,
+            time: r.time || "TBD",
+            status: r.status === "accepted" ? "Scheduled" : r.status,
+        }));
+
+        // Get recent feedback (last 5 completed reviews with feedback)
+        const recentFeedback = completedReviews
+            .filter(r => r.feedback || r.score)
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 5)
+            .map(r => ({
+                id: r._id,
+                reviewerName: r.reviewerId?.name || "Unknown",
+                date: r.date,
+                score: r.score || 0,
+                feedback: r.feedback || "No feedback provided",
+            }));
+
+        res.status(200).json({
+            stats: {
+                upcomingReviews: upcomingReviewsCount,
+                pendingTasks: pendingTasksCount,
+                overallProgress,
+                avgScore,
+            },
+            upcomingReviews: formattedUpcoming,
+            recentFeedback,
+        });
+    } catch (err) {
+        console.error("GET DASHBOARD ERROR:", err);
+        res.status(500).json({ message: "Failed to fetch dashboard" });
+    }
+};
 
 /* ======================================================
    GET STUDENT PROFILE (GET /api/students/me)
@@ -26,6 +131,7 @@ exports.getProfile = async (req, res) => {
                 phone: student.phone,
                 batch: student.batch,
                 course: student.course,
+                domain: student.domain,
                 avatar: student.avatar,
                 createdAt: student.createdAt,
             },

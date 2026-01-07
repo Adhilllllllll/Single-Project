@@ -15,6 +15,13 @@ router.get(
   adminController.getDashboardCounts
 );
 
+// Recent activity for dashboard
+router.get(
+  "/recent-activity",
+  authMiddleware("admin"),
+  adminController.getRecentActivity
+);
+
 // Review statistics for Review Status page
 router.get(
   "/review-stats",
