@@ -76,11 +76,36 @@ const reviewerAvailabilitySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Prevent duplicate slots
+// ============================================================
+// PARTIAL UNIQUE INDEXES
+// These prevent duplicate slots while allowing both recurring
+// and specific date availability types to coexist properly
+// ============================================================
+
+// Index 1: For recurring slots (dayOfWeek-based)
+// Ensures no duplicate recurring slots for same reviewer, day, and time
 reviewerAvailabilitySchema.index(
-  { reviewerId: 1, dayOfWeek: 1, startTime: 1, endTime: 1 },
-  { unique: true }
+  { reviewerId: 1, availabilityType: 1, dayOfWeek: 1, startTime: 1, endTime: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { availabilityType: "recurring" },
+    name: "unique_recurring_slot"
+  }
 );
+
+// Index 2: For specific date slots
+// Ensures no duplicate specific date slots for same reviewer, date, and time
+reviewerAvailabilitySchema.index(
+  { reviewerId: 1, availabilityType: 1, specificDate: 1, startTime: 1, endTime: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { availabilityType: "specific" },
+    name: "unique_specific_date_slot"
+  }
+);
+
+// Index for faster queries by reviewer
+reviewerAvailabilitySchema.index({ reviewerId: 1, availabilityType: 1 });
 
 module.exports = mongoose.model(
   "ReviewerAvailability",

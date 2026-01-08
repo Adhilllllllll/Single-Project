@@ -36,6 +36,16 @@ router.get(
 );
 
 /* =======================
+   REVIEWER COMPLETED HISTORY (must be before :reviewId)
+======================= */
+router.get(
+    "/reviewer/history",
+    authMiddleware("reviewer"),
+    reviewController.getReviewerCompletedHistory
+);
+
+
+/* =======================
    REVIEWER PROFILE (must be before :reviewId)
 ======================= */
 router.get(
@@ -97,6 +107,16 @@ router.get(
 );
 
 /* =======================
+   GET COMPLETED REVIEWS PENDING FINAL SCORE – ADVISOR
+   (Must be before dynamic :reviewId routes)
+======================= */
+router.get(
+    "/advisor/completed",
+    authMiddleware("advisor"),
+    reviewController.getCompletedReviewsForAdvisor
+);
+
+/* =======================
    GET SINGLE REVIEW – ADVISOR
 ======================= */
 router.get(
@@ -150,4 +170,41 @@ router.patch(
     reviewController.rejectReviewByReviewer
 );
 
+/* =======================
+   MARK REVIEW COMPLETED + SUBMIT EVALUATION – REVIEWER
+======================= */
+router.patch(
+    "/reviewer/:reviewId/complete",
+    authMiddleware("reviewer"),
+    reviewController.markReviewCompleted
+);
+
+/* =======================
+   SUBMIT FINAL SCORE – ADVISOR
+======================= */
+router.patch(
+    "/advisor/:reviewId/final-score",
+    authMiddleware("advisor"),
+    reviewController.submitFinalScore
+);
+
+/* =======================
+   GET REVIEW EVALUATIONS – ALL ROLES (role-based visibility)
+======================= */
+router.get(
+    "/:reviewId/evaluations",
+    authMiddleware(["advisor", "reviewer", "student"]),
+    reviewController.getReviewEvaluations
+);
+
+/* =======================
+   UPDATE REVIEW DETAILS – ADVISOR
+======================= */
+router.patch(
+    "/advisor/:reviewId/edit",
+    authMiddleware("advisor"),
+    reviewController.updateReviewDetails
+);
+
 module.exports = router;
+

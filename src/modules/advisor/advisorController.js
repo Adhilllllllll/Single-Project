@@ -232,7 +232,7 @@ exports.getStudentProfile = async (req, res) => {
 
 /**
  * GET /api/advisor/reviewers/availability
- * Fetch all reviewers with their availability slots
+ * Fetch all reviewers with their availability slots (both recurring and specific date)
  */
 exports.getReviewersWithAvailability = async (req, res) => {
   try {
@@ -242,33 +242,64 @@ exports.getReviewersWithAvailability = async (req, res) => {
       status: "active"
     }).select("_id name email domain reviewerStatus");
 
-    // 2. Get availability for each reviewer
+    // 2. Get availability for each reviewer (both recurring and specific)
     const reviewersWithAvailability = await Promise.all(
       reviewers.map(async (reviewer) => {
+        // Fetch all slots - don't filter by status to catch all slots
         const slots = await ReviewerAvailability.find({
           reviewerId: reviewer._id,
-          status: "active"
-        }).sort({ dayOfWeek: 1, startTime: 1 });
+          slotType: { $ne: "break" } // Exclude breaks
+        }).sort({ availabilityType: 1, dayOfWeek: 1, specificDate: 1, startTime: 1 });
 
-        // Map dayOfWeek numbers to day names
+        // Separate recurring and specific slots
+        const recurringSlots = slots.filter(s => s.availabilityType === "recurring");
+        const specificSlots = slots.filter(s => s.availabilityType === "specific");
+
+        // Map dayOfWeek numbers to day names for recurring slots
         const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const availabilityDays = [...new Set(slots.map(s => dayNames[s.dayOfWeek]))];
+        const availabilityDays = [...new Set(recurringSlots.map(s => dayNames[s.dayOfWeek]))];
 
-        // Find next available slot (simple logic for demo)
+        // Get upcoming specific dates
         const now = new Date();
-        const currentDay = now.getDay();
-        const nextSlot = slots.find(s => s.dayOfWeek >= currentDay);
+        const upcomingDates = specificSlots
+          .filter(s => s.specificDate >= now)
+          .map(s => s.specificDate.toISOString().split('T')[0])
+          .slice(0, 5); // Limit to next 5 dates
 
+        // Find next available slot
+        const currentDay = now.getDay();
+        const currentTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+        // Check recurring slots first
         let nextSlotText = "No slots available";
-        if (nextSlot) {
-          const dayDiff = nextSlot.dayOfWeek - currentDay;
-          if (dayDiff === 0) {
-            nextSlotText = `Today ${nextSlot.startTime}`;
-          } else if (dayDiff === 1) {
-            nextSlotText = `Tomorrow ${nextSlot.startTime}`;
+        const todayRecurringSlot = recurringSlots.find(s =>
+          s.dayOfWeek === currentDay && s.startTime > currentTimeStr
+        );
+        const futureRecurringSlot = recurringSlots.find(s => s.dayOfWeek > currentDay);
+        const nextWeekSlot = recurringSlots.find(s => s.dayOfWeek < currentDay);
+
+        if (todayRecurringSlot) {
+          nextSlotText = `Today ${todayRecurringSlot.startTime}`;
+        } else if (futureRecurringSlot) {
+          const dayDiff = futureRecurringSlot.dayOfWeek - currentDay;
+          if (dayDiff === 1) {
+            nextSlotText = `Tomorrow ${futureRecurringSlot.startTime}`;
           } else {
-            nextSlotText = `${dayNames[nextSlot.dayOfWeek]} ${nextSlot.startTime}`;
+            nextSlotText = `${dayNames[futureRecurringSlot.dayOfWeek]} ${futureRecurringSlot.startTime}`;
           }
+        } else if (nextWeekSlot) {
+          nextSlotText = `${dayNames[nextWeekSlot.dayOfWeek]} ${nextWeekSlot.startTime}`;
+        }
+
+        // Check specific date slots
+        const upcomingSpecificSlot = specificSlots.find(s => {
+          const slotDate = new Date(s.specificDate);
+          return slotDate >= now;
+        });
+        if (upcomingSpecificSlot && nextSlotText === "No slots available") {
+          const slotDate = new Date(upcomingSpecificSlot.specificDate);
+          const dateStr = slotDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          nextSlotText = `${dateStr} ${upcomingSpecificSlot.startTime}`;
         }
 
         return {
@@ -277,11 +308,15 @@ exports.getReviewersWithAvailability = async (req, res) => {
           email: reviewer.email,
           title: reviewer.domain || "Reviewer",
           availability: availabilityDays,
-          slots: slots,
+          upcomingDates: upcomingDates,
+          slots: slots, // All slots (recurring + specific)
+          recurringSlots: recurringSlots,
+          specificSlots: specificSlots,
           nextSlot: nextSlotText,
-          // Use actual reviewerStatus from User model (available, busy, dnd)
           status: reviewer.reviewerStatus || "available",
           totalSlots: slots.length,
+          recurringCount: recurringSlots.length,
+          specificCount: specificSlots.length,
         };
       })
     );
@@ -299,11 +334,30 @@ exports.getReviewersWithAvailability = async (req, res) => {
 /**
  * GET /api/advisor/analytics
  * Comprehensive analytics with real data from MongoDB
+ * Supports filters: startDate, endDate, studentId, reviewerId
  */
 exports.getAnalytics = async (req, res) => {
   try {
     const advisorId = req.user.id;
+    const { startDate, endDate, studentId, reviewerId } = req.query;
     const now = new Date();
+
+    // Build date filter
+    let dateFilter = {};
+    if (startDate || endDate) {
+      dateFilter.scheduledAt = {};
+      if (startDate) dateFilter.scheduledAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        dateFilter.scheduledAt.$lte = end;
+      }
+    }
+
+    // Build base query
+    const baseQuery = { advisor: advisorId, ...dateFilter };
+    if (studentId) baseQuery.student = studentId;
+    if (reviewerId) baseQuery.reviewer = reviewerId;
 
     // ========== STUDENT METRICS ==========
     const totalStudents = await Student.countDocuments({
@@ -311,49 +365,60 @@ exports.getAnalytics = async (req, res) => {
       status: "active"
     });
 
-    // Get students with progress
-    const students = await Student.find({ advisorId, status: "active" }).select("progress");
+    const students = await Student.find({ advisorId, status: "active" }).select("progress name");
     const avgStudentProgress = students.length > 0
       ? Math.round(students.reduce((sum, s) => sum + (s.progress || 0), 0) / students.length)
       : 0;
 
-    // ========== REVIEW METRICS ==========
-    // Total reviews created by this advisor
-    const totalReviews = await ReviewSession.countDocuments({ advisor: advisorId });
+    // ========== REVIEW METRICS (with filters) ==========
+    const totalReviews = await ReviewSession.countDocuments(baseQuery);
 
-    // Reviews by status
     const completedReviews = await ReviewSession.countDocuments({
-      advisor: advisorId,
-      status: "completed"
+      ...baseQuery,
+      status: { $in: ["completed", "scored"] }
     });
     const pendingReviews = await ReviewSession.countDocuments({
-      advisor: advisorId,
+      ...baseQuery,
       status: "pending"
     });
     const scheduledReviews = await ReviewSession.countDocuments({
-      advisor: advisorId,
+      ...baseQuery,
       status: "scheduled"
     });
     const cancelledReviews = await ReviewSession.countDocuments({
-      advisor: advisorId,
+      ...baseQuery,
       status: "cancelled"
     });
 
-    // Completion rate
     const completionRate = totalReviews > 0
       ? Math.round((completedReviews / totalReviews) * 100)
       : 0;
 
-    // ========== SCORE METRICS ==========
-    const reviewsWithScores = await ReviewSession.find({
-      advisor: advisorId,
-      status: "completed",
-      totalScore: { $exists: true, $ne: null }
-    }).select("totalScore");
+    // ========== SCORE METRICS (from FinalEvaluation) ==========
+    const FinalEvaluation = require("../reviews/FinalEvaluation");
 
-    const avgScore = reviewsWithScores.length > 0
-      ? Math.round(reviewsWithScores.reduce((sum, r) => sum + (r.totalScore || 0), 0) / reviewsWithScores.length)
-      : 0;
+    // Get scored reviews
+    const scoredReviews = await ReviewSession.find({
+      ...baseQuery,
+      status: "scored"
+    }).select("_id");
+
+    const scoredReviewIds = scoredReviews.map(r => r._id);
+
+    // Get final evaluations for scored reviews
+    const finalEvaluations = await FinalEvaluation.find({
+      reviewSession: { $in: scoredReviewIds }
+    });
+
+    let avgScore = 0;
+    let avgAttendance = 0;
+    let avgDiscipline = 0;
+
+    if (finalEvaluations.length > 0) {
+      avgScore = Math.round((finalEvaluations.reduce((sum, e) => sum + (e.finalScore || 0), 0) / finalEvaluations.length) * 10) / 10;
+      avgAttendance = Math.round((finalEvaluations.reduce((sum, e) => sum + (e.attendance || 0), 0) / finalEvaluations.length) * 10) / 10;
+      avgDiscipline = Math.round((finalEvaluations.reduce((sum, e) => sum + (e.discipline || 0), 0) / finalEvaluations.length) * 10) / 10;
+    }
 
     // ========== THIS WEEK METRICS ==========
     const dayOfWeek = now.getDay();
@@ -381,46 +446,41 @@ exports.getAnalytics = async (req, res) => {
     // ========== MONTHLY TREND (Last 6 months) ==========
     const monthlyTrend = [];
     for (let i = 5; i >= 0; i--) {
-      const startDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      const trendStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const trendEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
 
       const count = await ReviewSession.countDocuments({
         advisor: advisorId,
-        scheduledAt: { $gte: startDate, $lte: endDate }
+        scheduledAt: { $gte: trendStart, $lte: trendEnd }
       });
 
       const completedCount = await ReviewSession.countDocuments({
         advisor: advisorId,
-        status: "completed",
-        scheduledAt: { $gte: startDate, $lte: endDate }
+        status: { $in: ["completed", "scored"] },
+        scheduledAt: { $gte: trendStart, $lte: trendEnd }
       });
 
       monthlyTrend.push({
-        month: startDate.toLocaleString('default', { month: 'short' }),
-        year: startDate.getFullYear(),
+        month: trendStart.toLocaleString('default', { month: 'short' }),
+        year: trendStart.getFullYear(),
         total: count,
         completed: completedCount,
       });
     }
 
     // ========== REVIEWER PERFORMANCE ==========
+    const mongoose = require("mongoose");
+    const reviewerMatchQuery = { advisor: new mongoose.Types.ObjectId(advisorId) };
+    if (studentId) reviewerMatchQuery.student = new mongoose.Types.ObjectId(studentId);
+
     const reviewerStats = await ReviewSession.aggregate([
-      { $match: { advisor: advisorId } },
+      { $match: reviewerMatchQuery },
       {
         $group: {
           _id: "$reviewer",
           totalReviews: { $sum: 1 },
           completedReviews: {
-            $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] }
-          },
-          avgScore: {
-            $avg: {
-              $cond: [
-                { $and: [{ $eq: ["$status", "completed"] }, { $ne: ["$totalScore", null] }] },
-                "$totalScore",
-                null
-              ]
-            }
+            $sum: { $cond: [{ $in: ["$status", ["completed", "scored"]] }, 1, 0] }
           }
         }
       },
@@ -445,13 +505,45 @@ exports.getAnalytics = async (req, res) => {
               { $multiply: [{ $divide: ["$completedReviews", "$totalReviews"] }, 100] },
               0
             ]
-          },
-          avgScore: { $round: [{ $ifNull: ["$avgScore", 0] }, 0] }
+          }
         }
       },
       { $sort: { completedReviews: -1 } },
       { $limit: 10 }
     ]);
+
+    // ========== STUDENT PERFORMANCE ==========
+    const studentStats = await ReviewSession.aggregate([
+      { $match: { advisor: new mongoose.Types.ObjectId(advisorId), status: { $in: ["completed", "scored"] } } },
+      {
+        $group: {
+          _id: "$student",
+          totalReviews: { $sum: 1 }
+        }
+      },
+      {
+        $lookup: {
+          from: "students",
+          localField: "_id",
+          foreignField: "_id",
+          as: "studentInfo"
+        }
+      },
+      { $unwind: { path: "$studentInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          name: { $ifNull: ["$studentInfo.name", "Unknown"] },
+          totalReviews: 1,
+          progress: { $ifNull: ["$studentInfo.progress", 0] }
+        }
+      },
+      { $sort: { totalReviews: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // Get reviewers list for filter dropdown
+    const reviewers = await User.find({ role: "reviewer", status: "active" }).select("_id name");
 
     return res.json({
       message: "Analytics data fetched",
@@ -466,12 +558,15 @@ exports.getAnalytics = async (req, res) => {
         cancelledReviews,
         completionRate,
         avgScore,
+        avgAttendance,
+        avgDiscipline,
         reviewsThisWeek,
         reviewsThisMonth,
 
         // Charts Data
         monthlyTrend,
         reviewerPerformance: reviewerStats,
+        studentPerformance: studentStats,
 
         // Status Breakdown
         statusBreakdown: {
@@ -479,6 +574,12 @@ exports.getAnalytics = async (req, res) => {
           pending: pendingReviews,
           scheduled: scheduledReviews,
           cancelled: cancelledReviews,
+        },
+
+        // Filter options
+        filterOptions: {
+          students: students.map(s => ({ _id: s._id, name: s.name })),
+          reviewers: reviewers.map(r => ({ _id: r._id, name: r.name }))
         }
       }
     });
@@ -487,3 +588,4 @@ exports.getAnalytics = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+

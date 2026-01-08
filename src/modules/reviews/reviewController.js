@@ -1,7 +1,11 @@
 const ReviewSession = require("./reviewSession");
+const ReviewerEvaluation = require("./ReviewerEvaluation");
+const FinalEvaluation = require("./FinalEvaluation");
 const Student = require("../students/student");
 const User = require("../users/User");
 const mongoose = require("mongoose");
+const Notification = require("../notifications/Notification");
+const { sendReviewAssignmentEmail } = require("../auth/emailService");
 
 
 /* ======================================================
@@ -58,6 +62,9 @@ exports.createReview = async (req, res) => {
       return res.status(404).json({ message: "Reviewer not found" });
     }
 
+    // Get advisor info for email
+    const advisor = await User.findById(advisorId);
+
     const review = await ReviewSession.create({
       student: studentId,
       advisor: advisorId,
@@ -68,6 +75,20 @@ exports.createReview = async (req, res) => {
       meetingLink: mode === "online" ? meetingLink : null,
       location: mode === "offline" ? location : null,
     });
+
+    // Send email notifications to both student and reviewer
+    sendReviewAssignmentEmail({
+      studentEmail: student.email,
+      studentName: student.name,
+      reviewerEmail: reviewer.email,
+      reviewerName: reviewer.name,
+      advisorName: advisor?.name || "Advisor",
+      scheduledAt: new Date(scheduledAt),
+      mode,
+      meetingLink: mode === "online" ? meetingLink : null,
+      location: mode === "offline" ? location : null,
+      week,
+    }).catch(err => console.error("Email notification failed:", err.message));
 
     return res.status(201).json({
       message: "Review scheduled successfully",
@@ -706,6 +727,7 @@ exports.getReviewerDashboard = async (req, res) => {
 
 /* ======================================================
    GET STUDENT UPCOMING REVIEWS
+   Returns scheduled reviews + calculated next expected review
 ====================================================== */
 exports.getStudentUpcomingReviews = async (req, res) => {
   try {
@@ -723,8 +745,8 @@ exports.getStudentUpcomingReviews = async (req, res) => {
       .sort({ scheduledAt: 1 })
       .lean();
 
-    // Format response
-    const formatted = upcomingReviews.map((r) => ({
+    // Format scheduled reviews
+    const scheduledReviews = upcomingReviews.map((r) => ({
       _id: r._id,
       reviewer: r.reviewer,
       advisor: r.advisor,
@@ -734,9 +756,54 @@ exports.getStudentUpcomingReviews = async (req, res) => {
       meetingLink: r.meetingLink,
       location: r.location,
       week: r.week,
+      type: "scheduled", // Explicitly scheduled by advisor
     }));
 
-    res.status(200).json({ upcomingReviews: formatted });
+    // ========== CALCULATE NEXT EXPECTED REVIEW ==========
+    // Get the last completed/scored review for this student
+    const lastCompletedReview = await ReviewSession.findOne({
+      student: studentId,
+      status: { $in: ["completed", "scored"] },
+    })
+      .sort({ scheduledAt: -1 })
+      .lean();
+
+    let nextExpectedReview = null;
+
+    if (lastCompletedReview) {
+      // Calculate next expected date: lastCompleted + 7 days
+      const lastReviewDate = new Date(lastCompletedReview.scheduledAt);
+      const nextExpectedDate = new Date(lastReviewDate);
+      nextExpectedDate.setDate(nextExpectedDate.getDate() + 7);
+
+      // Only show if no scheduled review exists for that week
+      // and the date is in the future
+      const hasScheduledForNextWeek = scheduledReviews.some(r => {
+        const scheduledDate = new Date(r.scheduledAt);
+        const diffDays = Math.abs((scheduledDate - nextExpectedDate) / (1000 * 60 * 60 * 24));
+        return diffDays <= 3; // Within 3 days tolerance
+      });
+
+      if (!hasScheduledForNextWeek && nextExpectedDate > now) {
+        nextExpectedReview = {
+          expectedDate: nextExpectedDate,
+          lastReviewDate: lastReviewDate,
+          lastReviewWeek: lastCompletedReview.week,
+          nextWeek: (lastCompletedReview.week || 0) + 1,
+          type: "expected", // Auto-calculated, not yet scheduled
+          message: "Based on weekly review cycle",
+        };
+      }
+    }
+
+    res.status(200).json({
+      upcomingReviews: scheduledReviews,
+      nextExpectedReview,
+      stats: {
+        totalScheduled: scheduledReviews.length,
+        hasNextExpected: !!nextExpectedReview,
+      }
+    });
   } catch (err) {
     console.error("STUDENT UPCOMING REVIEWS ERROR:", err);
     res.status(500).json({ message: "Failed to fetch upcoming reviews" });
@@ -924,3 +991,583 @@ exports.getStudentProgress = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch progress data" });
   }
 };
+
+/* ======================================================
+   MARK REVIEW AS COMPLETED + SUBMIT EVALUATION – REVIEWER
+====================================================== */
+exports.markReviewCompleted = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+    const { reviewId } = req.params;
+    const { scores, feedback, remarks } = req.body;
+
+    // Validate required fields
+    if (!scores || !feedback) {
+      return res.status(400).json({
+        message: "Scores and feedback are required"
+      });
+    }
+
+    // Validate scores structure (4 task-wise scores, NO overallPerformance)
+    const requiredScores = [
+      'technicalUnderstanding',
+      'taskCompletion',
+      'communication',
+      'problemSolving'
+    ];
+
+    for (const scoreKey of requiredScores) {
+      if (scores[scoreKey] === undefined || scores[scoreKey] === null) {
+        return res.status(400).json({
+          message: `Score for ${scoreKey} is required`
+        });
+      }
+      if (scores[scoreKey] < 0 || scores[scoreKey] > 10) {
+        return res.status(400).json({
+          message: `Score for ${scoreKey} must be between 0 and 10`
+        });
+      }
+      // Validate 0.5 step
+      if ((scores[scoreKey] * 10) % 5 !== 0) {
+        return res.status(400).json({
+          message: `Score for ${scoreKey} must be in 0.5 increments`
+        });
+      }
+    }
+
+    // Find the review
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      reviewer: reviewerId,
+    }).populate("advisor", "name email");
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    // Validate status transition - only accepted reviews can be completed
+    if (review.status !== "accepted") {
+      return res.status(400).json({
+        message: `Cannot mark review as completed. Current status: ${review.status}. Only accepted reviews can be completed.`,
+      });
+    }
+
+    // Check if evaluation already exists
+    const existingEvaluation = await ReviewerEvaluation.findOne({
+      reviewSession: reviewId,
+    });
+
+    if (existingEvaluation) {
+      return res.status(400).json({
+        message: "Evaluation already submitted for this review",
+      });
+    }
+
+    // Create reviewer evaluation (4 task-wise scores only)
+    const evaluation = new ReviewerEvaluation({
+      reviewSession: reviewId,
+      reviewer: reviewerId,
+      scores: {
+        technicalUnderstanding: scores.technicalUnderstanding,
+        taskCompletion: scores.taskCompletion,
+        communication: scores.communication,
+        problemSolving: scores.problemSolving,
+      },
+      feedback: feedback.trim(),
+      remarks: remarks?.trim() || "",
+    });
+
+    await evaluation.save();
+
+    // Update review status to completed
+    review.status = "completed";
+    review.feedback = feedback.trim();
+    await review.save();
+
+    // Create notification for advisor
+    try {
+      await Notification.create({
+        recipient: review.advisor._id,
+        type: "review_completed",
+        title: "Review Completed",
+        message: `Review has been completed and evaluation submitted. Ready for final scoring.`,
+        data: {
+          reviewId: review._id,
+          reviewerEvaluationId: evaluation._id,
+        },
+      });
+    } catch (notifErr) {
+      console.error("Failed to create notification:", notifErr);
+      // Don't fail the request if notification fails
+    }
+
+    res.status(200).json({
+      message: "Review marked as completed and evaluation submitted successfully",
+      reviewId: review._id,
+      status: review.status,
+      evaluation: {
+        id: evaluation._id,
+        averageScore: evaluation.averageScore,
+      },
+    });
+  } catch (err) {
+    console.error("Mark Review Completed Error:", err);
+    res.status(500).json({ message: "Failed to complete review" });
+  }
+};
+
+/* ======================================================
+   SUBMIT FINAL SCORE – ADVISOR
+====================================================== */
+exports.submitFinalScore = async (req, res) => {
+  try {
+    const advisorId = req.user.id;
+    const { reviewId } = req.params;
+    const { finalScore, attendance, discipline, adjustedScores, finalRemarks } = req.body;
+
+    // Validate required fields
+    if (finalScore === undefined || finalScore === null) {
+      return res.status(400).json({
+        message: "Final score is required"
+      });
+    }
+
+    // Validate score ranges and 0.5 step
+    const validateScore = (score, name) => {
+      if (score < 0 || score > 10) {
+        return `${name} must be between 0 and 10`;
+      }
+      if ((score * 10) % 5 !== 0) {
+        return `${name} must be in 0.5 increments`;
+      }
+      return null;
+    };
+
+    const finalScoreError = validateScore(finalScore, "Final score");
+    if (finalScoreError) {
+      return res.status(400).json({ message: finalScoreError });
+    }
+
+    // Validate attendance if provided
+    if (attendance !== undefined && attendance !== null) {
+      const attendanceError = validateScore(attendance, "Attendance");
+      if (attendanceError) {
+        return res.status(400).json({ message: attendanceError });
+      }
+    }
+
+    // Validate discipline if provided
+    if (discipline !== undefined && discipline !== null) {
+      const disciplineError = validateScore(discipline, "Discipline");
+      if (disciplineError) {
+        return res.status(400).json({ message: disciplineError });
+      }
+    }
+
+    // Find the review
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      advisor: advisorId,
+    })
+      .populate("student", "name email")
+      .populate("reviewer", "name email");
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    // Validate status transition - only completed reviews can be scored
+    if (review.status !== "completed") {
+      return res.status(400).json({
+        message: `Cannot submit final score. Current status: ${review.status}. Only completed reviews can be scored.`,
+      });
+    }
+
+    // Get reviewer evaluation
+    const reviewerEvaluation = await ReviewerEvaluation.findOne({
+      reviewSession: reviewId,
+    });
+
+    if (!reviewerEvaluation) {
+      return res.status(400).json({
+        message: "Reviewer evaluation not found. Reviewer must complete evaluation first.",
+      });
+    }
+
+    // Check if final evaluation already exists
+    const existingFinalEval = await FinalEvaluation.findOne({
+      reviewSession: reviewId,
+    });
+
+    if (existingFinalEval) {
+      return res.status(400).json({
+        message: "Final score already submitted for this review",
+      });
+    }
+
+    // Create final evaluation with attendance and discipline
+    const finalEvaluation = new FinalEvaluation({
+      reviewSession: reviewId,
+      advisor: advisorId,
+      reviewerEvaluation: reviewerEvaluation._id,
+      finalScore,
+      attendance: attendance || 0,
+      discipline: discipline || 0,
+      adjustedScores: adjustedScores || {},
+      finalRemarks: finalRemarks?.trim() || "",
+    });
+
+    await finalEvaluation.save();
+
+    // Update review status to scored and store final marks
+    review.status = "scored";
+    review.marks = finalScore;
+    await review.save();
+
+    // Create notification for student
+    try {
+      await Notification.create({
+        recipient: review.student._id,
+        type: "final_score_published",
+        title: "Final Score Published",
+        message: `Your review score has been finalized. Final Score: ${finalScore}/10`,
+        data: {
+          reviewId: review._id,
+          finalScore,
+        },
+      });
+    } catch (notifErr) {
+      console.error("Failed to create notification:", notifErr);
+    }
+
+    // Create notification for reviewer (read-only visibility)
+    try {
+      await Notification.create({
+        recipient: review.reviewer._id,
+        type: "final_score_published",
+        title: "Final Score Published",
+        message: `The advisor has finalized the score for the review you conducted.`,
+        data: {
+          reviewId: review._id,
+          finalScore,
+        },
+      });
+    } catch (notifErr) {
+      console.error("Failed to create notification:", notifErr);
+    }
+
+    res.status(200).json({
+      message: "Final score submitted successfully",
+      reviewId: review._id,
+      status: review.status,
+      finalEvaluation: {
+        id: finalEvaluation._id,
+        finalScore,
+      },
+    });
+  } catch (err) {
+    console.error("Submit Final Score Error:", err);
+    res.status(500).json({ message: "Failed to submit final score" });
+  }
+};
+
+/* ======================================================
+   GET REVIEW EVALUATIONS – ROLE-BASED ACCESS
+====================================================== */
+exports.getReviewEvaluations = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const { reviewId } = req.params;
+
+    // Find the review
+    const review = await ReviewSession.findById(reviewId)
+      .populate("student", "name email")
+      .populate("reviewer", "name email")
+      .populate("advisor", "name email");
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    // Role-based access control
+    const isAdvisor = review.advisor._id.toString() === userId;
+    const isReviewer = review.reviewer._id.toString() === userId;
+    const isStudent = review.student._id.toString() === userId;
+
+    if (!isAdvisor && !isReviewer && !isStudent) {
+      return res.status(403).json({
+        message: "You don't have permission to view this review's evaluations"
+      });
+    }
+
+    // Get reviewer evaluation
+    const reviewerEvaluation = await ReviewerEvaluation.findOne({
+      reviewSession: reviewId,
+    }).populate("reviewer", "name email");
+
+    // Get final evaluation
+    const finalEvaluation = await FinalEvaluation.findOne({
+      reviewSession: reviewId,
+    }).populate("advisor", "name email");
+
+    // Build response based on role
+    const response = {
+      review: {
+        id: review._id,
+        status: review.status,
+        scheduledAt: review.scheduledAt,
+        student: review.student,
+        reviewer: review.reviewer,
+        advisor: review.advisor,
+        week: review.week,
+      },
+    };
+
+    // Reviewer can see their own evaluation
+    // Advisor can see reviewer evaluation
+    // Student cannot see reviewer evaluation (only final)
+    if ((isReviewer || isAdvisor) && reviewerEvaluation) {
+      response.reviewerEvaluation = {
+        id: reviewerEvaluation._id,
+        scores: reviewerEvaluation.scores,
+        averageScore: reviewerEvaluation.averageScore,
+        feedback: reviewerEvaluation.feedback,
+        remarks: reviewerEvaluation.remarks,
+        submittedAt: reviewerEvaluation.createdAt,
+        submittedBy: reviewerEvaluation.reviewer,
+      };
+    }
+
+    // Final evaluation visible to all participants
+    if (finalEvaluation) {
+      response.finalEvaluation = {
+        id: finalEvaluation._id,
+        finalScore: finalEvaluation.finalScore,
+        finalRemarks: finalEvaluation.finalRemarks,
+        submittedAt: finalEvaluation.createdAt,
+        submittedBy: finalEvaluation.advisor,
+      };
+
+      // Adjusted scores visible only to advisor
+      if (isAdvisor && finalEvaluation.adjustedScores) {
+        response.finalEvaluation.adjustedScores = finalEvaluation.adjustedScores;
+      }
+    }
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error("Get Review Evaluations Error:", err);
+    res.status(500).json({ message: "Failed to fetch evaluations" });
+  }
+};
+
+/* ======================================================
+   GET COMPLETED REVIEWS FOR ADVISOR (PENDING FINAL SCORE)
+====================================================== */
+exports.getCompletedReviewsForAdvisor = async (req, res) => {
+  try {
+    const advisorId = req.user.id;
+
+    // Get all completed reviews for this advisor
+    const completedReviews = await ReviewSession.find({
+      advisor: advisorId,
+      status: "completed",
+    })
+      .populate("student", "name email")
+      .populate("reviewer", "name email")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    // Get reviewer evaluations for these reviews
+    const reviewIds = completedReviews.map(r => r._id);
+    const evaluations = await ReviewerEvaluation.find({
+      reviewSession: { $in: reviewIds },
+    }).lean();
+
+    // Map evaluations to reviews
+    const evaluationMap = {};
+    evaluations.forEach(e => {
+      evaluationMap[e.reviewSession.toString()] = e;
+    });
+
+    // Format response
+    const formatted = completedReviews.map(r => ({
+      id: r._id,
+      student: r.student,
+      reviewer: r.reviewer,
+      scheduledAt: r.scheduledAt,
+      completedAt: r.updatedAt,
+      week: r.week,
+      status: r.status,
+      reviewerEvaluation: evaluationMap[r._id.toString()] ? {
+        averageScore: evaluationMap[r._id.toString()].averageScore,
+        feedback: evaluationMap[r._id.toString()].feedback,
+      } : null,
+    }));
+
+    res.status(200).json({ completedReviews: formatted });
+  } catch (err) {
+    console.error("Get Completed Reviews Error:", err);
+    res.status(500).json({ message: "Failed to fetch completed reviews" });
+  }
+};
+
+/* ======================================================
+   UPDATE REVIEW DETAILS – ADVISOR
+   Allows editing: scheduledAt, mode, meetingLink, location
+   Blocked for: scored, cancelled reviews
+====================================================== */
+exports.updateReviewDetails = async (req, res) => {
+  try {
+    const advisorId = req.user.id;
+    const { reviewId } = req.params;
+    const { scheduledAt, mode, meetingLink, location } = req.body;
+
+    // Find the review
+    const review = await ReviewSession.findOne({
+      _id: reviewId,
+      advisor: advisorId,
+    });
+
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    // Block editing for scored or cancelled reviews
+    if (review.status === "scored" || review.status === "cancelled") {
+      return res.status(400).json({
+        message: `Cannot edit a ${review.status} review`,
+      });
+    }
+
+    // Update allowed fields
+    if (scheduledAt) {
+      review.scheduledAt = new Date(scheduledAt);
+    }
+
+    if (mode && ["online", "offline"].includes(mode)) {
+      review.mode = mode;
+    }
+
+    if (meetingLink !== undefined) {
+      review.meetingLink = meetingLink;
+    }
+
+    if (location !== undefined) {
+      review.location = location;
+    }
+
+    await review.save();
+
+    // Populate for response
+    await review.populate("student", "name email");
+    await review.populate("reviewer", "name email");
+
+    res.status(200).json({
+      message: "Review updated successfully",
+      review: {
+        id: review._id,
+        student: review.student,
+        reviewer: review.reviewer,
+        scheduledAt: review.scheduledAt,
+        mode: review.mode,
+        meetingLink: review.meetingLink,
+        location: review.location,
+        status: review.status,
+        week: review.week,
+      },
+    });
+  } catch (err) {
+    console.error("Update Review Details Error:", err);
+    res.status(500).json({ message: "Failed to update review details" });
+  }
+};
+
+/* ======================================================
+   GET REVIEWER COMPLETED HISTORY – REVIEWER
+   Returns completed/scored reviews with submitted evaluation scores
+====================================================== */
+exports.getReviewerCompletedHistory = async (req, res) => {
+  try {
+    const reviewerId = req.user.id;
+    const { page = 1, limit = 20, sortBy = "date_desc" } = req.query;
+
+    // Build sort option
+    let sortOption = { scheduledAt: -1 };
+    if (sortBy === "date_asc") sortOption = { scheduledAt: 1 };
+
+    // Get completed/scored reviews for this reviewer
+    const reviews = await ReviewSession.find({
+      reviewer: new mongoose.Types.ObjectId(reviewerId),
+      status: { $in: ["completed", "scored"] },
+    })
+      .populate("student", "name email")
+      .populate("advisor", "name email domain")
+      .sort(sortOption)
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit))
+      .lean();
+
+    // Get total count for pagination
+    const total = await ReviewSession.countDocuments({
+      reviewer: new mongoose.Types.ObjectId(reviewerId),
+      status: { $in: ["completed", "scored"] },
+    });
+
+    // Get reviewer evaluations for these reviews
+    const reviewIds = reviews.map((r) => r._id);
+    const evaluations = await ReviewerEvaluation.find({
+      reviewSession: { $in: reviewIds },
+    }).lean();
+
+    // Map evaluations by review ID
+    const evalMap = {};
+    evaluations.forEach((e) => {
+      evalMap[e.reviewSession.toString()] = e;
+    });
+
+    // Format response with scores
+    const formattedHistory = reviews.map((r) => {
+      const evaluation = evalMap[r._id.toString()];
+      return {
+        id: r._id,
+        student: {
+          id: r.student?._id,
+          name: r.student?.name || "Unknown",
+          email: r.student?.email || "",
+        },
+        advisor: {
+          id: r.advisor?._id,
+          name: r.advisor?.name || "Unknown",
+          domain: r.advisor?.domain || "General",
+        },
+        scheduledAt: r.scheduledAt,
+        completedAt: r.updatedAt,
+        week: r.week,
+        status: r.status,
+        mode: r.mode,
+        // Reviewer's submitted scores
+        scores: evaluation?.scores || null,
+        averageScore: evaluation?.averageScore || null,
+        feedback: evaluation?.feedback || "",
+        remarks: evaluation?.remarks || "",
+      };
+    });
+
+    res.status(200).json({
+      history: formattedHistory,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (err) {
+    console.error("Get Reviewer History Error:", err);
+    res.status(500).json({ message: "Failed to fetch review history" });
+  }
+};
+
+

@@ -1,5 +1,5 @@
 {
-  "name": "rms-project",
+  "name": "edunexus-api",
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
@@ -8,7 +8,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "EduNexus Backend API - Where Learning Connects",
   "dependencies": {
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
