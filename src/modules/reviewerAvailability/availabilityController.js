@@ -2,8 +2,41 @@ const ReviewerAvailability = require("./ReviewerAvailability");
 const User = require("../users/User");
 const ReviewSession = require("../reviews/reviewSession");
 
-// Day name constants for logging
+// Constants
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const VALID_STATUSES = ["available", "busy", "dnd"];
+
+/* ======================================================
+   INTERNAL HELPER FUNCTIONS
+====================================================== */
+
+// Response helpers
+const sendSuccess = (res, data, message = "Success", status = 200) => {
+  res.status(status).json({ message, ...data });
+};
+
+const sendError = (res, message, status = 500, extra = {}) => {
+  res.status(status).json({ message, ...extra });
+};
+
+const handleError = (res, err, context) => {
+  // Handle MongoDB duplicate key error
+  if (err.code === 11000) {
+    return sendError(res, "This time slot already exists", 409, {
+      conflictType: "duplicate",
+      code: "DUPLICATE_KEY"
+    });
+  }
+  console.error(`${context} Error:`, err);
+  sendError(res, "Server error", 500);
+};
+
+// Time validation helpers
+const isValidTimeFormat = (time) => TIME_REGEX.test(time);
+const isValidDateFormat = (date) => DATE_REGEX.test(date);
+
 
 /* ======================================================
    CREATE AVAILABILITY (Reviewer only)

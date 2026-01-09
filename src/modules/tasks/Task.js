@@ -16,6 +16,11 @@ const taskSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        category: {
+            type: String,
+            enum: ["Coding", "Documentation", "Communication", "Research", "Project", "Other"],
+            default: "Other",
+        },
         deadline: {
             type: Date,
             required: true,
@@ -27,7 +32,7 @@ const taskSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["Pending", "In Progress", "Completed"],
+            enum: ["Pending", "In Progress", "Completed", "Overdue"],
             default: "Pending",
         },
         attachmentRequired: {
@@ -39,9 +44,32 @@ const taskSchema = new mongoose.Schema(
             path: String,
             uploadedAt: Date,
         },
+        submittedAt: {
+            type: Date,
+        },
         createdBy: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "User", // Advisor who created the task
+            required: true,
+        },
+        // Optional link to a review session
+        reviewLink: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "ReviewSession",
+        },
+        // Advisor feedback on submission
+        feedback: {
+            comment: String,
+            rating: {
+                type: Number,
+                min: 1,
+                max: 10,
+            },
+            givenAt: Date,
+            givenBy: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "User",
+            },
         },
     },
     { timestamps: true }
@@ -49,7 +77,9 @@ const taskSchema = new mongoose.Schema(
 
 // Indexes
 taskSchema.index({ student: 1 });
+taskSchema.index({ createdBy: 1 });
 taskSchema.index({ deadline: 1 });
 taskSchema.index({ status: 1 });
+taskSchema.index({ category: 1 });
 
 module.exports = mongoose.model("Task", taskSchema);

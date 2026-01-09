@@ -2,6 +2,44 @@ const mongoose = require("mongoose");
 const Notification = require("./Notification");
 
 /* ======================================================
+   INTERNAL HELPER FUNCTIONS
+====================================================== */
+
+// Response helpers
+const sendSuccess = (res, data, message = "Success", status = 200) => {
+    res.status(status).json({ message, ...data });
+};
+
+const sendError = (res, message, status = 500) => {
+    res.status(status).json({ message });
+};
+
+const handleError = (res, err, context, fallbackMsg = "Operation failed") => {
+    console.error(`${context} ERROR:`, err);
+    sendError(res, fallbackMsg, 500);
+};
+
+// ObjectId helper
+const toObjectId = (id) => new mongoose.Types.ObjectId(id);
+
+// Notification formatter - standardize notification objects
+const formatNotification = (n) => ({
+    id: n._id,
+    type: n.type,
+    title: n.title,
+    message: n.message,
+    isRead: n.isRead,
+    readAt: n.readAt,
+    link: n.link,
+    createdAt: n.createdAt,
+});
+
+// Constants
+const NOTIFICATION_LIMIT = 50;
+const MS_PER_HOUR = 60 * 60 * 1000;
+
+
+/* ======================================================
    GET USER NOTIFICATIONS
 ====================================================== */
 exports.getNotifications = async (req, res) => {

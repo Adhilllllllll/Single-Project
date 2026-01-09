@@ -5,11 +5,41 @@ const User = require("../users/User");
 const Student = require("../students/student");
 const { sendPasswordResetEmail } = require("./emailService");
 
+/* ======================================================
+   INTERNAL HELPER FUNCTIONS
+====================================================== */
 
+// Response helpers - consistent patterns
+const sendSuccess = (res, data, message = "Success", status = 200) => {
+  res.status(status).json({ message, ...data });
+};
 
+const sendError = (res, message, status = 500) => {
+  res.status(status).json({ message });
+};
 
+const handleError = (res, err, context) => {
+  console.error(`${context} ERROR:`, err);
+  sendError(res, "Server error", 500);
+};
 
+// Find account in User or Student collection
+const findAccountByEmail = async (email) => {
+  const emailNormalized = email.trim().toLowerCase();
+  let account = await User.findOne({ email: emailNormalized });
+  let accountType = "user";
 
+  if (!account) {
+    account = await Student.findOne({ email: emailNormalized });
+    accountType = "student";
+  }
+
+  return { account, accountType };
+};
+
+// Constants
+const BCRYPT_ROUNDS = 10;
+const RESET_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
 
 /* ======================================================
    LOGIN
@@ -17,57 +47,33 @@ const { sendPasswordResetEmail } = require("./emailService");
    - Handles first-time login (mustChangePassword)
 ====================================================== */
 exports.login = async (req, res) => {
-  console.log(" AUTH LOGIN HIT");
-  console.log("METHOD:", req.method);
-  console.log(" URL:", req.originalUrl);
-  console.log(" HEADERS:", req.headers);
-  console.log(" BODY:", req.body);
   try {
     const { email, password } = req.body || {};
 
-    // 1️⃣ Validate input
+    // Validate input
     if (!email || !password) {
-      return res.status(400).json({
-        message: "Email and password are required",
-      });
+      return sendError(res, "Email and password are required", 400);
     }
 
-    const emailNormalized = email.trim().toLowerCase();
-
-    // 2️⃣ Find account (User first, then Student)
-    let account = await User.findOne({ email: emailNormalized });
-    let accountType = "user";
+    // Find account
+    const { account, accountType } = await findAccountByEmail(email);
 
     if (!account) {
-      account = await Student.findOne({ email: emailNormalized });
-      accountType = "student";
+      return sendError(res, "Invalid credentials", 400);
     }
 
-    if (!account) {
-      return res.status(400).json({
-        message: "Invalid credentials",
-      });
+    // Check account status
+    if (account.status === "inactive") {
+      return sendError(res, "Account disabled", 403);
     }
 
-    // 3️⃣ Check account status (if exists)
-    if (account.status && account.status === "inactive") {
-      return res.status(403).json({
-        message: "Account disabled",
-      });
-    }
-
-    // 4️⃣ Verify password
+    // Verify password
     const isMatch = await bcrypt.compare(password, account.passwordHash);
     if (!isMatch) {
-      return res.status(400).json({
-        message: "Invalid credentials",
-      });
+      return sendError(res, "Invalid credentials", 400);
     }
 
-    // 5️⃣ Check if password change is required
-    const mustChangePassword = account.mustChangePassword || false;
-
-    // 6️⃣ Generate access token
+    // Generate access token
     const tokenPayload = {
       id: account._id,
       role: accountType === "student" ? "student" : account.role,
@@ -76,10 +82,10 @@ exports.login = async (req, res) => {
 
     const accessToken = signAccessToken(tokenPayload);
 
-    // 7️⃣ Success response (include mustChangePassword flag)
-    return res.status(200).json({
+    // Success response
+    return sendSuccess(res, {
       accessToken,
-      mustChangePassword,
+      mustChangePassword: account.mustChangePassword || false,
       user: {
         id: account._id,
         name: account.name,
@@ -89,13 +95,9 @@ exports.login = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("LOGIN ERROR:", err);
-    return res.status(500).json({
-      message: "Server error",
-    });
+    handleError(res, err, "LOGIN");
   }
 };
-
 /* ======================================================
    FORGOT PASSWORD
    - Sends password reset email with token
@@ -104,53 +106,31 @@ exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body || {};
 
-    if (!email) {
-      return res.status(400).json({
-        message: "Email is required",
-      });
-    }
+    if (!email) return sendError(res, "Email is required", 400);
 
-    const emailNormalized = email.trim().toLowerCase();
-
-    // Find account in User or Student collection
-    let account = await User.findOne({ email: emailNormalized });
-
-    if (!account) {
-      account = await Student.findOne({ email: emailNormalized });
-    }
+    const { account } = await findAccountByEmail(email);
 
     // Always return success (don't reveal if email exists)
-    if (!account) {
-      return res.status(200).json({
-        message: "If an account with that email exists, a reset link has been sent.",
-      });
-    }
+    const successMsg = "If an account with that email exists, a reset link has been sent.";
+    if (!account) return sendSuccess(res, {}, successMsg);
 
     // Generate reset token
     const resetToken = crypto.randomBytes(32).toString("hex");
     const resetTokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
 
-    // Save token to account (expires in 1 hour)
+    // Save token to account
     account.resetPasswordToken = resetTokenHash;
-    account.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    account.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
     await account.save();
 
-    // Send reset email
-    try {
-      await sendPasswordResetEmail(account.email, account.name, resetToken);
-    } catch (emailErr) {
-      console.error("Email send failed:", emailErr);
-    }
+    // Send reset email (no await - fire and forget)
+    sendPasswordResetEmail(account.email, account.name, resetToken).catch(err =>
+      console.error("Email send failed:", err.message)
+    );
 
-    return res.status(200).json({
-      message: "If an account with that email exists, a reset link has been sent.",
-    });
-
+    return sendSuccess(res, {}, successMsg);
   } catch (err) {
-    console.error("FORGOT PASSWORD ERROR:", err);
-    return res.status(500).json({
-      message: "Server error",
-    });
+    handleError(res, err, "FORGOT PASSWORD");
   }
 };
 
@@ -163,15 +143,11 @@ exports.resetPassword = async (req, res) => {
     const { token, newPassword } = req.body || {};
 
     if (!token || !newPassword) {
-      return res.status(400).json({
-        message: "Token and new password are required",
-      });
+      return sendError(res, "Token and new password are required", 400);
     }
 
     if (newPassword.length < 8) {
-      return res.status(400).json({
-        message: "Password must be at least 8 characters",
-      });
+      return sendError(res, "Password must be at least 8 characters", 400);
     }
 
     // Hash the token to match stored hash
@@ -190,28 +166,18 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    if (!account) {
-      return res.status(400).json({
-        message: "Invalid or expired reset token",
-      });
-    }
+    if (!account) return sendError(res, "Invalid or expired reset token", 400);
 
     // Update password
-    account.passwordHash = await bcrypt.hash(newPassword, 10);
+    account.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
     account.resetPasswordToken = undefined;
     account.resetPasswordExpires = undefined;
     account.mustChangePassword = false;
     account.passwordChangedAt = new Date();
     await account.save();
 
-    return res.status(200).json({
-      message: "Password reset successful. Please login with your new password.",
-    });
-
+    return sendSuccess(res, {}, "Password reset successful. Please login with your new password.");
   } catch (err) {
-    console.error("RESET PASSWORD ERROR:", err);
-    return res.status(500).json({
-      message: "Server error",
-    });
+    handleError(res, err, "RESET PASSWORD");
   }
 };

@@ -6,6 +6,32 @@ const Task = require("../tasks/Task");
 const User = require("../users/User");
 
 /* ======================================================
+   INTERNAL HELPER FUNCTIONS
+====================================================== */
+
+// Response helpers
+const sendSuccess = (res, data, message = "Success", status = 200) => {
+    res.status(status).json({ message, ...data });
+};
+
+const sendError = (res, message, status = 500) => {
+    res.status(status).json({ message });
+};
+
+const handleError = (res, err, context) => {
+    console.error(`${context} ERROR:`, err);
+    sendError(res, "Server error", 500);
+};
+
+// ObjectId helper
+const toObjectId = (id) => new mongoose.Types.ObjectId(id);
+
+// Constants
+const BCRYPT_ROUNDS = 10;
+const MIN_PASSWORD_LENGTH = 8;
+
+
+/* ======================================================
    GET STUDENT DASHBOARD (GET /api/students/dashboard)
 ====================================================== */
 exports.getDashboard = async (req, res) => {
@@ -92,14 +118,28 @@ exports.getDashboard = async (req, res) => {
                 feedback: r.feedback || "No feedback provided",
             }));
 
+        // Format completed reviews list for display
+        const completedReviewsList = completedReviews
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 5)
+            .map(r => ({
+                id: r._id,
+                reviewerName: r.reviewerId?.name || "Unknown",
+                date: r.date,
+                score: r.score || 0,
+                status: "Completed",
+            }));
+
         res.status(200).json({
             stats: {
                 upcomingReviews: upcomingReviewsCount,
                 pendingTasks: pendingTasksCount,
                 overallProgress,
                 avgScore,
+                completedReviews: completedReviews.length,
             },
             upcomingReviews: formattedUpcoming,
+            completedReviews: completedReviewsList,
             recentFeedback,
         });
     } catch (err) {

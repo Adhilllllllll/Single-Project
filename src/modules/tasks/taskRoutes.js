@@ -46,4 +46,57 @@ router.get(
     taskController.getWorkshopMaterials
 );
 
+/* =======================
+   ADVISOR TASKS
+======================= */
+// Create new task for student(s)
+router.post(
+    "/advisor/tasks",
+    authMiddleware("advisor"),
+    taskController.createTask
+);
+
+// Get all tasks created by this advisor
+router.get(
+    "/advisor/tasks",
+    authMiddleware("advisor"),
+    taskController.getAdvisorTasks
+);
+
+// Get tasks for specific student
+router.get(
+    "/advisor/students/:studentId/tasks",
+    authMiddleware("advisor"),
+    taskController.getStudentTasksByAdvisor
+);
+
+// Update task details
+router.put(
+    "/advisor/tasks/:taskId",
+    authMiddleware("advisor"),
+    taskController.updateTask
+);
+
+// Delete task
+router.delete(
+    "/advisor/tasks/:taskId",
+    authMiddleware("advisor"),
+    taskController.deleteTask
+);
+
+// Add feedback to task submission
+router.patch(
+    "/advisor/tasks/:taskId/feedback",
+    authMiddleware("advisor"),
+    taskController.addTaskFeedback
+);
+
+// Download student attachment
+router.get(
+    "/advisor/tasks/:taskId/attachment",
+    authMiddleware("advisor"),
+    taskController.getTaskAttachment
+);
+
 module.exports = router;
+

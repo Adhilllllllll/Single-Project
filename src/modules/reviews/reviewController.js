@@ -1,3 +1,50 @@
+/**
+ * ========================================================================
+ *    REVIEW CONTROLLER
+ *    Manages review sessions across Advisor, Reviewer, and Student roles
+ * ========================================================================
+ * 
+ * TABLE OF CONTENTS
+ * -----------------
+ * 1. INTERNAL HELPERS (Line ~30)
+ *    - Response helpers: sendSuccess, sendError, handleControllerError
+ *    - Formatters: formatReviewDate, formatReviewForResponse
+ *    - Validators: isValidObjectId, toObjectId
+ * 
+ * 2. ADVISOR FLOWS (Line ~70)
+ *    - createReview: Schedule new review session
+ *    - getMyAdvisorReviews: List advisor's reviews
+ *    - getSingleReview: Get review details
+ *    - rescheduleReview: Change review timing
+ *    - cancelReview: Cancel a scheduled review
+ *    - updateReviewDetails: Edit review mode/link/location
+ *    - submitFinalScore: Submit final evaluation
+ *    - getCompletedReviewsForAdvisor: Reviews pending final score
+ * 
+ * 3. REVIEWER FLOWS (Line ~350)
+ *    - getMyReviewerReviews: List assigned reviews
+ *    - acceptReviewByReviewer: Accept review assignment
+ *    - rejectReviewByReviewer: Decline with reason
+ *    - getSingleReviewByReviewer: Get review details
+ *    - markReviewCompleted: Submit reviewer evaluation
+ *    - getReviewerDashboard: Dashboard stats + data
+ *    - getReviewerProfile: Get profile info
+ *    - updateReviewerProfile: Update profile
+ *    - getPerformanceAnalytics: Historical analytics
+ *    - getReviewerCompletedHistory: Paginated history
+ * 
+ * 4. STUDENT FLOWS (Line ~720)
+ *    - getStudentUpcomingReviews: Scheduled + predicted reviews
+ *    - getStudentReviewHistory: Past reviews
+ *    - getStudentReviewReport: Single review report
+ *    - getStudentProgress: Progress metrics
+ * 
+ * 5. SHARED / MULTI-ROLE (Line ~1270)
+ *    - getReviewEvaluations: Role-based evaluation access
+ * 
+ * ========================================================================
+ */
+
 const ReviewSession = require("./reviewSession");
 const ReviewerEvaluation = require("./ReviewerEvaluation");
 const FinalEvaluation = require("./FinalEvaluation");
@@ -7,10 +54,81 @@ const mongoose = require("mongoose");
 const Notification = require("../notifications/Notification");
 const { sendReviewAssignmentEmail } = require("../auth/emailService");
 
+/* ========================================================================
+   1. INTERNAL HELPER FUNCTIONS
+   ========================================================================
+   Purpose: Shared utilities used across all controller functions
+   - Response standardization
+   - Date/object formatting
+   - Validation helpers
+   ======================================================================== */
 
-/* ======================================================
-   CREATE REVIEW (ADVISOR ONLY)
-====================================================== */
+
+// Response helpers - standardize all responses
+const sendSuccess = (res, data, message = "Success", status = 200) => {
+  res.status(status).json({ message, ...data });
+};
+
+const sendError = (res, message, status = 500) => {
+  res.status(status).json({ message });
+};
+
+const handleControllerError = (res, err, context, fallbackMsg = "Operation failed") => {
+  console.error(`${context} Error:`, err);
+  sendError(res, fallbackMsg, 500);
+};
+
+// Date formatting helper - reused across multiple functions
+const formatReviewDate = (date) => ({
+  date: new Date(date).toLocaleDateString("en-US", {
+    year: "numeric", month: "short", day: "numeric"
+  }),
+  time: new Date(date).toLocaleTimeString("en-US", {
+    hour: "2-digit", minute: "2-digit"
+  })
+});
+
+// Review formatter - standardize review object transformation
+const formatReviewForResponse = (review) => {
+  const { date, time } = formatReviewDate(review.scheduledAt);
+  return {
+    id: review._id,
+    student: review.student?.name || "Unknown",
+    studentEmail: review.student?.email || "",
+    reviewer: review.reviewer?.name || "Unknown",
+    reviewerEmail: review.reviewer?.email || "",
+    domain: review.reviewer?.domain || "General",
+    date,
+    time,
+    scheduledAt: review.scheduledAt,
+    week: review.week,
+    status: review.status.charAt(0).toUpperCase() + review.status.slice(1),
+    mode: review.mode,
+    meetingLink: review.meetingLink,
+    location: review.location,
+    marks: review.marks,
+    feedback: review.feedback,
+  };
+};
+
+// Validation helpers
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+const toObjectId = (id) => new mongoose.Types.ObjectId(id);
+
+/* ========================================================================
+   2. ADVISOR FLOWS
+   ========================================================================
+   Role: Advisor (manages student reviews)
+   Purpose: Create, reschedule, cancel reviews; submit final scores
+   Side Effects: Notifications to reviewer/student, email on assignment
+   ======================================================================== */
+
+/**
+ * CREATE REVIEW
+ * Schedules a new review session between student and reviewer
+ * Side effects: Notification + email to reviewer
+ */
 exports.createReview = async (req, res) => {
   try {
     const advisorId = req.user.id;
@@ -137,40 +255,17 @@ exports.getMyReviewerReviews = async (req, res) => {
 exports.getMyAdvisorReviews = async (req, res) => {
   try {
     const reviews = await ReviewSession.find({
-      advisor: new mongoose.Types.ObjectId(req.user.id),
+      advisor: toObjectId(req.user.id),
     })
       .populate("student", "name email")
       .populate("reviewer", "name email domain")
-      .sort({ scheduledAt: -1 });
+      .sort({ scheduledAt: -1 })
+      .lean();
 
-    // Format response for frontend
-    const formattedReviews = reviews.map(r => ({
-      id: r._id,
-      student: r.student?.name || "Unknown",
-      studentEmail: r.student?.email || "",
-      reviewer: r.reviewer?.name || "Unknown",
-      reviewerEmail: r.reviewer?.email || "",
-      domain: r.reviewer?.domain || "General",
-      date: new Date(r.scheduledAt).toLocaleDateString("en-US", {
-        year: "numeric", month: "short", day: "numeric"
-      }),
-      time: new Date(r.scheduledAt).toLocaleTimeString("en-US", {
-        hour: "2-digit", minute: "2-digit"
-      }),
-      scheduledAt: r.scheduledAt,
-      week: r.week,
-      status: r.status.charAt(0).toUpperCase() + r.status.slice(1),
-      mode: r.mode,
-      meetingLink: r.meetingLink,
-      location: r.location,
-      marks: r.marks,
-      feedback: r.feedback,
-    }));
-
-    res.status(200).json({ reviews: formattedReviews });
+    const formattedReviews = reviews.map(formatReviewForResponse);
+    sendSuccess(res, { reviews: formattedReviews });
   } catch (err) {
-    console.error("Advisor Reviews Error:", err);
-    res.status(500).json({ message: "Failed to fetch advisor reviews" });
+    handleControllerError(res, err, "Advisor Reviews", "Failed to fetch advisor reviews");
   }
 };
 
@@ -292,41 +387,33 @@ exports.cancelReview = async (req, res) => {
       advisor: advisorId,
     });
 
-    if (!review) {
-      return res.status(404).json({ message: "Review not found" });
-    }
-
-    if (review.status === "completed") {
-      return res.status(400).json({
-        message: "Cannot cancel a completed review"
-      });
-    }
-
-    if (review.status === "cancelled") {
-      return res.status(400).json({
-        message: "Review is already cancelled"
-      });
-    }
+    if (!review) return sendError(res, "Review not found", 404);
+    if (review.status === "completed") return sendError(res, "Cannot cancel a completed review", 400);
+    if (review.status === "cancelled") return sendError(res, "Review is already cancelled", 400);
 
     review.status = "cancelled";
     review.feedback = `Cancelled: ${reason}`;
     await review.save();
 
     // TODO: Send notifications if notifyParticipants is true
-
-    res.status(200).json({
-      message: "Review cancelled successfully",
-      reviewId: review._id,
-    });
+    sendSuccess(res, { reviewId: review._id }, "Review cancelled successfully");
   } catch (err) {
-    console.error("Cancel Review Error:", err);
-    res.status(500).json({ message: "Failed to cancel review" });
+    handleControllerError(res, err, "Cancel Review", "Failed to cancel review");
   }
 };
 
-/* ======================================================
-   ACCEPT REVIEW – REVIEWER
-====================================================== */
+/* ========================================================================
+   3. REVIEWER FLOWS
+   ========================================================================
+   Role: Reviewer (conducts reviews, provides evaluations)
+   Purpose: Accept/reject assignments, submit evaluations, view history
+   Side Effects: Status updates, evaluation records
+   ======================================================================== */
+
+/**
+ * ACCEPT REVIEW
+ * Reviewer accepts a pending review assignment
+ */
 exports.acceptReviewByReviewer = async (req, res) => {
   try {
     const reviewerId = req.user.id;
@@ -337,27 +424,17 @@ exports.acceptReviewByReviewer = async (req, res) => {
       reviewer: reviewerId,
     });
 
-    if (!review) {
-      return res.status(404).json({ message: "Review not found" });
-    }
-
+    if (!review) return sendError(res, "Review not found", 404);
     if (review.status !== "pending") {
-      return res.status(400).json({
-        message: `Cannot accept a review with status: ${review.status}`,
-      });
+      return sendError(res, `Cannot accept a review with status: ${review.status}`, 400);
     }
 
     review.status = "accepted";
     await review.save();
 
-    res.status(200).json({
-      message: "Review accepted successfully",
-      reviewId: review._id,
-      status: review.status,
-    });
+    sendSuccess(res, { reviewId: review._id, status: review.status }, "Review accepted successfully");
   } catch (err) {
-    console.error("Accept Review Error:", err);
-    res.status(500).json({ message: "Failed to accept review" });
+    handleControllerError(res, err, "Accept Review", "Failed to accept review");
   }
 };
 
@@ -375,30 +452,18 @@ exports.rejectReviewByReviewer = async (req, res) => {
       reviewer: reviewerId,
     });
 
-    if (!review) {
-      return res.status(404).json({ message: "Review not found" });
-    }
-
+    if (!review) return sendError(res, "Review not found", 404);
     if (review.status !== "pending") {
-      return res.status(400).json({
-        message: `Cannot reject a review with status: ${review.status}`,
-      });
+      return sendError(res, `Cannot reject a review with status: ${review.status}`, 400);
     }
 
     review.status = "rejected";
-    if (reason) {
-      review.feedback = `Rejected: ${reason}`;
-    }
+    if (reason) review.feedback = `Rejected: ${reason}`;
     await review.save();
 
-    res.status(200).json({
-      message: "Review rejected successfully",
-      reviewId: review._id,
-      status: review.status,
-    });
+    sendSuccess(res, { reviewId: review._id, status: review.status }, "Review rejected successfully");
   } catch (err) {
-    console.error("Reject Review Error:", err);
-    res.status(500).json({ message: "Failed to reject review" });
+    handleControllerError(res, err, "Reject Review", "Failed to reject review");
   }
 };
 
@@ -415,13 +480,12 @@ exports.getSingleReviewByReviewer = async (req, res) => {
       reviewer: reviewerId,
     })
       .populate("student", "name email")
-      .populate("advisor", "name email domain");
+      .populate("advisor", "name email domain")
+      .lean();
 
-    if (!review) {
-      return res.status(404).json({ message: "Review not found" });
-    }
+    if (!review) return sendError(res, "Review not found", 404);
 
-    res.status(200).json({
+    sendSuccess(res, {
       review: {
         id: review._id,
         student: review.student?.name || "Unknown",
@@ -439,8 +503,7 @@ exports.getSingleReviewByReviewer = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("Get Single Review Error:", err);
-    res.status(500).json({ message: "Failed to fetch review" });
+    handleControllerError(res, err, "Get Single Review", "Failed to fetch review");
   }
 };
 
@@ -449,13 +512,13 @@ exports.getSingleReviewByReviewer = async (req, res) => {
 ====================================================== */
 exports.getPerformanceAnalytics = async (req, res) => {
   try {
-    const reviewerId = new mongoose.Types.ObjectId(req.user.id);
+    const reviewerId = toObjectId(req.user.id);
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-    // Get all reviews for this reviewer
-    const allReviews = await ReviewSession.find({ reviewer: reviewerId });
+    // Get all reviews for this reviewer with lean() for performance
+    const allReviews = await ReviewSession.find({ reviewer: reviewerId }).lean();
     const completedReviews = allReviews.filter(r => r.status === "completed");
 
     // Total reviews
@@ -725,10 +788,18 @@ exports.getReviewerDashboard = async (req, res) => {
   }
 };
 
-/* ======================================================
-   GET STUDENT UPCOMING REVIEWS
-   Returns scheduled reviews + calculated next expected review
-====================================================== */
+/* ========================================================================
+   4. STUDENT FLOWS
+   ========================================================================
+   Role: Student (view their reviews and progress)
+   Purpose: Access upcoming reviews, history, reports, progress metrics
+   Side Effects: None (read-only operations)
+   ======================================================================== */
+
+/**
+ * GET STUDENT UPCOMING REVIEWS
+ * Returns scheduled reviews + calculated next expected review
+ */
 exports.getStudentUpcomingReviews = async (req, res) => {
   try {
     const studentId = new mongoose.Types.ObjectId(req.user.id);
@@ -817,10 +888,10 @@ exports.getStudentReviewHistory = async (req, res) => {
   try {
     const studentId = new mongoose.Types.ObjectId(req.user.id);
 
-    // Fetch completed reviews
+    // Fetch completed and scored reviews
     const completedReviews = await ReviewSession.find({
       student: studentId,
-      status: "completed",
+      status: { $in: ["completed", "scored"] },
     })
       .populate("reviewer", "name email")
       .populate("advisor", "name email")
@@ -871,7 +942,23 @@ exports.getStudentReviewReport = async (req, res) => {
       return res.status(404).json({ message: "Review not found" });
     }
 
-    // Format report response
+    // Fetch FinalEvaluation if review is scored
+    let finalEvaluation = null;
+    if (review.status === "scored") {
+      finalEvaluation = await FinalEvaluation.findOne({
+        reviewSession: review._id,
+      }).lean();
+    }
+
+    // Fetch ReviewerEvaluation for additional context
+    let reviewerEvaluation = null;
+    if (review.status === "completed" || review.status === "scored") {
+      reviewerEvaluation = await ReviewerEvaluation.findOne({
+        reviewSession: review._id,
+      }).lean();
+    }
+
+    // Format report response with all evaluation data
     const report = {
       _id: review._id,
       student: review.student,
@@ -885,6 +972,23 @@ exports.getStudentReviewReport = async (req, res) => {
       marks: review.marks,
       score: review.marks !== undefined && review.marks !== null ? Math.round(review.marks * 10) : null,
       feedback: review.feedback,
+
+      // FinalEvaluation data (from advisor - authoritative scores)
+      finalEvaluation: finalEvaluation ? {
+        finalScore: finalEvaluation.finalScore,
+        attendance: finalEvaluation.attendance,
+        discipline: finalEvaluation.discipline,
+        adjustedScores: finalEvaluation.adjustedScores,
+        finalRemarks: finalEvaluation.finalRemarks,
+      } : null,
+
+      // ReviewerEvaluation data (from reviewer)
+      reviewerEvaluation: reviewerEvaluation ? {
+        scores: reviewerEvaluation.scores,
+        averageScore: reviewerEvaluation.averageScore,
+        feedback: reviewerEvaluation.feedback,
+        remarks: reviewerEvaluation.remarks,
+      } : null,
     };
 
     res.status(200).json({ report });
@@ -907,9 +1011,9 @@ exports.getStudentProgress = async (req, res) => {
       .sort({ scheduledAt: 1 })
       .lean();
 
-    // Total reviews and completed count
+    // Total reviews and completed/scored count
     const totalReviews = allReviews.length;
-    const completedReviews = allReviews.filter(r => r.status === "completed");
+    const completedReviews = allReviews.filter(r => r.status === "completed" || r.status === "scored");
     const completedCount = completedReviews.length;
 
     // Calculate average score (marks are 0-10, convert to percentage)
@@ -925,14 +1029,19 @@ exports.getStudentProgress = async (req, res) => {
       ? Math.round((completedCount / totalReviews) * 100)
       : 0;
 
-    // Progress over time (weekly scores)
+    // Progress over time (weekly scores) - include completed and scored
     const weeklyProgress = allReviews
-      .filter(r => r.status === "completed" && r.marks !== undefined)
-      .map(r => ({
-        week: r.week,
-        score: Math.round(r.marks * 10),
-        date: r.scheduledAt,
-      }))
+      .filter(r => (r.status === "completed" || r.status === "scored") && r.marks !== undefined)
+      .map(r => {
+        const score = Math.round(r.marks * 10);
+        return {
+          week: r.week,
+          score,
+          date: r.scheduledAt,
+          // Severity based on marks (0-10 scale): ≥8 green, 6-7 yellow, <6 red
+          severity: r.marks >= 8 ? "green" : r.marks >= 6 ? "yellow" : "red",
+        };
+      })
       .sort((a, b) => a.week - b.week);
 
     // Learning milestones (all reviews as milestones)

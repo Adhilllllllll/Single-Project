@@ -5,6 +5,41 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const { sendUserCredentials } = require("../auth/emailService");
 
+/* ======================================================
+   INTERNAL HELPER FUNCTIONS
+====================================================== */
+
+// Response helpers
+const sendSuccess = (res, data, message = "Success", status = 200) => {
+  res.status(status).json({ message, ...data });
+};
+
+const sendError = (res, message, status = 500) => {
+  res.status(status).json({ message });
+};
+
+const handleError = (res, err, context) => {
+  console.error(`${context} ERROR:`, err);
+  sendError(res, "Server error", 500);
+};
+
+// Password generation helper
+const generateSecurePassword = () => {
+  return crypto.randomBytes(4).toString("hex") + "A1!"; // 8-char + complexity
+};
+
+// User formatter helper
+const formatUserForResponse = (user, model = "User") => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role || "student",
+  status: user.status,
+  avatar: user.avatar,
+  model,
+});
+
+
 /**
  * GET /api/admin/me
  * Get logged-in admin's profile
@@ -68,8 +103,8 @@ exports.getRecentActivity = async (req, res) => {
     const recentReviews = await ReviewSession.find({})
       .sort({ createdAt: -1 })
       .limit(15)
-      .populate("studentId", "name")
-      .populate("reviewerId", "name")
+      .populate("student", "name")
+      .populate("reviewer", "name")
       .lean();
 
     // Get recently registered students (last 2 weeks)
@@ -96,13 +131,13 @@ exports.getRecentActivity = async (req, res) => {
 
       if (review.status === "completed") {
         type = "complete";
-        message = `Review for ${review.studentId?.name || "Student"} was completed.`;
+        message = `Review for ${review.student?.name || "Student"} was completed.`;
       } else if (review.status === "pending") {
         type = "pending";
-        message = `Review for ${review.studentId?.name || "Student"} is pending approval.`;
+        message = `Review for ${review.student?.name || "Student"} is pending approval.`;
       } else if (review.status === "accepted") {
         type = "add";
-        message = `Review for ${review.studentId?.name || "Student"} was scheduled.`;
+        message = `Review for ${review.student?.name || "Student"} was scheduled.`;
       }
 
       activities.push({
@@ -202,32 +237,55 @@ exports.getReviewStats = async (req, res) => {
       ? Math.round(((recentCompleted - previousCompleted) / previousCompleted) * 100)
       : recentCompleted > 0 ? 100 : 0;
 
-    // ========== MONTHLY TREND (Last 6 months) ==========
-    const monthlyTrend = [];
-    for (let i = 5; i >= 0; i--) {
-      const startDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const endDate = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+    // ========== MONTHLY TREND (Last 6 months) - Single Aggregation ==========
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-      const [monthCompleted, monthInProgress, monthScheduled] = await Promise.all([
-        ReviewSession.countDocuments({
-          status: "completed",
-          scheduledAt: { $gte: startDate, $lte: endDate },
-        }),
-        ReviewSession.countDocuments({
-          status: { $in: ["pending", "in-progress"] },
-          scheduledAt: { $gte: startDate, $lte: endDate },
-        }),
-        ReviewSession.countDocuments({
-          status: "scheduled",
-          scheduledAt: { $gte: startDate, $lte: endDate },
-        }),
-      ]);
+    const monthlyAggregation = await ReviewSession.aggregate([
+      {
+        $match: {
+          scheduledAt: { $gte: sixMonthsAgo },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: "$scheduledAt" },
+            month: { $month: "$scheduledAt" },
+          },
+          completed: {
+            $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] },
+          },
+          inProgress: {
+            $sum: {
+              $cond: [{ $in: ["$status", ["pending", "in-progress"]] }, 1, 0],
+            },
+          },
+          scheduled: {
+            $sum: { $cond: [{ $eq: ["$status", "scheduled"] }, 1, 0] },
+          },
+        },
+      },
+      { $sort: { "_id.year": 1, "_id.month": 1 } },
+    ]);
+
+    // Map month numbers to names and fill gaps for all 6 months
+    const monthNames = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthlyTrend = [];
+
+    for (let i = 5; i >= 0; i--) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const targetYear = targetDate.getFullYear();
+      const targetMonth = targetDate.getMonth() + 1;
+
+      const found = monthlyAggregation.find(
+        (m) => m._id.year === targetYear && m._id.month === targetMonth
+      );
 
       monthlyTrend.push({
-        month: startDate.toLocaleString("default", { month: "short" }),
-        completed: monthCompleted,
-        inProgress: monthInProgress,
-        scheduled: monthScheduled,
+        month: monthNames[targetMonth],
+        completed: found?.completed || 0,
+        inProgress: found?.inProgress || 0,
+        scheduled: found?.scheduled || 0,
       });
     }
 
