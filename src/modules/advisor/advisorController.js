@@ -294,10 +294,11 @@ exports.getReviewersWithAvailability = async (req, res) => {
         const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
         const availabilityDays = [...new Set(recurringSlots.map(s => dayNames[s.dayOfWeek]))];
 
-        // Get upcoming specific dates
+        // Get upcoming specific dates (normalize to start of day for comparison)
         const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const upcomingDates = specificSlots
-          .filter(s => s.specificDate >= now)
+          .filter(s => new Date(s.specificDate) >= todayStart)
           .map(s => s.specificDate.toISOString().split('T')[0])
           .slice(0, 5); // Limit to next 5 dates
 

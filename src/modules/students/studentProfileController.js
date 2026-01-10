@@ -56,9 +56,9 @@ exports.getDashboard = async (req, res) => {
         ] = await Promise.all([
             // Count upcoming reviews (scheduled, not completed)
             ReviewSession.countDocuments({
-                studentId: studentId,
+                student: studentId,
                 status: { $in: ["pending", "accepted", "scheduled"] },
-                date: { $gte: new Date() },
+                scheduledAt: { $gte: new Date() },
             }),
             // Count pending tasks
             Task.countDocuments({
@@ -66,19 +66,19 @@ exports.getDashboard = async (req, res) => {
                 status: { $in: ["pending", "in-progress"] },
             }),
             // Total reviews for this student
-            ReviewSession.countDocuments({ studentId: studentId }),
+            ReviewSession.countDocuments({ student: studentId }),
             // Completed reviews with scores
             ReviewSession.find({
-                studentId: studentId,
-                status: "completed",
-            }).select("score feedback reviewerId date").populate("reviewerId", "name").lean(),
+                student: studentId,
+                status: { $in: ["completed", "scored"] },
+            }).select("marks feedback reviewer scheduledAt week").populate("reviewer", "name").lean(),
         ]);
 
         // Calculate average score and overall progress
         let avgScore = 0;
         if (completedReviews.length > 0) {
-            const totalScore = completedReviews.reduce((sum, r) => sum + (r.score || 0), 0);
-            avgScore = Math.round(totalScore / completedReviews.length);
+            const totalScore = completedReviews.reduce((sum, r) => sum + (r.marks || 0), 0);
+            avgScore = Math.round((totalScore / completedReviews.length) * 10) / 10;
         }
         const overallProgress = totalReviews > 0
             ? Math.round((completedReviews.length / totalReviews) * 100)
@@ -86,48 +86,51 @@ exports.getDashboard = async (req, res) => {
 
         // Get upcoming reviews list (next 5)
         const upcomingReviews = await ReviewSession.find({
-            studentId: studentId,
+            student: studentId,
             status: { $in: ["pending", "accepted", "scheduled"] },
-            date: { $gte: new Date() },
+            scheduledAt: { $gte: new Date() },
         })
-            .sort({ date: 1 })
+            .sort({ scheduledAt: 1 })
             .limit(5)
-            .populate("reviewerId", "name")
+            .populate("reviewer", "name")
             .lean();
 
         // Format upcoming reviews
         const formattedUpcoming = upcomingReviews.map(r => ({
             id: r._id,
-            reviewerName: r.reviewerId?.name || "TBD",
+            reviewerName: r.reviewer?.name || "TBD",
             advisorName: student.advisorId?.name || "N/A",
-            date: r.date,
+            date: r.scheduledAt,
             time: r.time || "TBD",
             status: r.status === "accepted" ? "Scheduled" : r.status,
+            week: r.week,
         }));
 
         // Get recent feedback (last 5 completed reviews with feedback)
         const recentFeedback = completedReviews
-            .filter(r => r.feedback || r.score)
-            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .filter(r => r.feedback || r.marks)
+            .sort((a, b) => new Date(b.scheduledAt) - new Date(a.scheduledAt))
             .slice(0, 5)
             .map(r => ({
                 id: r._id,
-                reviewerName: r.reviewerId?.name || "Unknown",
-                date: r.date,
-                score: r.score || 0,
+                reviewerName: r.reviewer?.name || "Unknown",
+                date: r.scheduledAt,
+                score: r.marks || 0,
                 feedback: r.feedback || "No feedback provided",
+                week: r.week,
             }));
 
         // Format completed reviews list for display
         const completedReviewsList = completedReviews
-            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .sort((a, b) => new Date(b.scheduledAt) - new Date(a.scheduledAt))
             .slice(0, 5)
             .map(r => ({
                 id: r._id,
-                reviewerName: r.reviewerId?.name || "Unknown",
-                date: r.date,
-                score: r.score || 0,
+                reviewerName: r.reviewer?.name || "Unknown",
+                date: r.scheduledAt,
+                score: r.marks || 0,
                 status: "Completed",
+                week: r.week,
             }));
 
         res.status(200).json({
