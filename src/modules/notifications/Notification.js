@@ -37,6 +37,8 @@ const notificationSchema = new mongoose.Schema(
             enum: [
                 "review_reminder",
                 "review_scheduled",
+                "review_rescheduled",
+                "review_cancelled",
                 "review_completed",
                 "feedback_available",
                 "new_message",

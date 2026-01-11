@@ -54,15 +54,32 @@ const mongoose = require("mongoose");
 const Notification = require("../notifications/Notification");
 const { sendReviewAssignmentEmail } = require("../auth/emailService");
 
-/* ========================================================================
-   1. INTERNAL HELPER FUNCTIONS
-   ========================================================================
-   Purpose: Shared utilities used across all controller functions
-   - Response standardization
-   - Date/object formatting
-   - Validation helpers
-   ======================================================================== */
+// Import helpers (Phase 1 refactor)
+const {
+  formatReviewDate,
+  formatReviewForResponse,
+  isValidObjectId,
+  toObjectId,
+} = require("./review.helpers");
 
+// Import validation (Phase 2 refactor)
+const {
+  ValidationError,
+  validateCreateReview,
+  validateRescheduleReview,
+  validateCancelReview,
+  validateUpdateReviewerProfile,
+} = require("./review.validation");
+
+// Import service (Phase 3 refactor)
+const reviewService = require("./review.service");
+const { ServiceError } = reviewService;
+
+/* ========================================================================
+   1. RESPONSE HELPERS
+   ========================================================================
+   Purpose: HTTP response standardization (kept here as they use res object)
+   ======================================================================== */
 
 // Response helpers - standardize all responses
 const sendSuccess = (res, data, message = "Success", status = 200) => {
@@ -77,44 +94,6 @@ const handleControllerError = (res, err, context, fallbackMsg = "Operation faile
   console.error(`${context} Error:`, err);
   sendError(res, fallbackMsg, 500);
 };
-
-// Date formatting helper - reused across multiple functions
-const formatReviewDate = (date) => ({
-  date: new Date(date).toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric"
-  }),
-  time: new Date(date).toLocaleTimeString("en-US", {
-    hour: "2-digit", minute: "2-digit"
-  })
-});
-
-// Review formatter - standardize review object transformation
-const formatReviewForResponse = (review) => {
-  const { date, time } = formatReviewDate(review.scheduledAt);
-  return {
-    id: review._id,
-    student: review.student?.name || "Unknown",
-    studentEmail: review.student?.email || "",
-    reviewer: review.reviewer?.name || "Unknown",
-    reviewerEmail: review.reviewer?.email || "",
-    domain: review.reviewer?.domain || "General",
-    date,
-    time,
-    scheduledAt: review.scheduledAt,
-    week: review.week,
-    status: review.status.charAt(0).toUpperCase() + review.status.slice(1),
-    mode: review.mode,
-    meetingLink: review.meetingLink,
-    location: review.location,
-    marks: review.marks,
-    feedback: review.feedback,
-  };
-};
-
-// Validation helpers
-const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
-
-const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
 /* ========================================================================
    2. ADVISOR FLOWS
@@ -133,90 +112,30 @@ exports.createReview = async (req, res) => {
   try {
     const advisorId = req.user.id;
 
-    const {
-      studentId,
-      reviewerId,
-      week,
-      scheduledAt,
-      mode,
-      meetingLink,
-      location,
-    } = req.body;
-
-    // Basic validation
-    if (!studentId || !reviewerId || !week || !scheduledAt || !mode) {
-      return res.status(400).json({
-        message: "Missing required fields",
-      });
+    // Validate input (Phase 2)
+    let validated;
+    try {
+      validated = validateCreateReview(req.body);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return res.status(400).json({ message: err.message });
+      }
+      throw err;
     }
 
-    if (!["online", "offline"].includes(mode)) {
-      return res.status(400).json({
-        message: "Invalid review mode",
-      });
-    }
-
-    // Verify student
-    const student = await Student.findById(studentId);
-    if (!student) {
-      return res.status(404).json({ message: "Student not found" });
-    }
-
-    // Ensure advisor owns the student
-    if (student.advisorId.toString() !== advisorId) {
-      return res.status(403).json({
-        message: "You are not assigned as this student's advisor",
-      });
-    }
-
-    // Verify reviewer
-    const reviewer = await User.findOne({
-      _id: reviewerId,
-      role: "reviewer",
-      status: "active",
-    });
-
-    if (!reviewer) {
-      return res.status(404).json({ message: "Reviewer not found" });
-    }
-
-    // Get advisor info for email
-    const advisor = await User.findById(advisorId);
-
-    const review = await ReviewSession.create({
-      student: studentId,
-      advisor: advisorId,
-      reviewer: reviewerId,
-      week,
-      scheduledAt: new Date(scheduledAt),
-      mode,
-      meetingLink: mode === "online" ? meetingLink : null,
-      location: mode === "offline" ? location : null,
-    });
-
-    // Send email notifications to both student and reviewer
-    sendReviewAssignmentEmail({
-      studentEmail: student.email,
-      studentName: student.name,
-      reviewerEmail: reviewer.email,
-      reviewerName: reviewer.name,
-      advisorName: advisor?.name || "Advisor",
-      scheduledAt: new Date(scheduledAt),
-      mode,
-      meetingLink: mode === "online" ? meetingLink : null,
-      location: mode === "offline" ? location : null,
-      week,
-    }).catch(err => console.error("Email notification failed:", err.message));
+    // Call service (Phase 3)
+    const review = await reviewService.createReview(validated, advisorId);
 
     return res.status(201).json({
       message: "Review scheduled successfully",
       review,
     });
   } catch (err) {
+    if (err instanceof ServiceError) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
     console.error("Create Review Error:", err);
-    res.status(500).json({
-      message: "Failed to create review",
-    });
+    res.status(500).json({ message: "Failed to create review" });
   }
 };
 
@@ -229,7 +148,7 @@ exports.getMyReviewerReviews = async (req, res) => {
 
     // Build query
     const query = {
-      reviewer: new mongoose.Types.ObjectId(req.user.id),
+      reviewer: toObjectId(req.user.id),
     };
 
     // Filter by status if provided
@@ -319,40 +238,20 @@ exports.rescheduleReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
     const advisorId = req.user.id;
-    const { scheduledAt, reviewerId, notifyParticipants } = req.body;
 
-    if (!scheduledAt) {
-      return res.status(400).json({ message: "New date/time is required" });
+    // Validate input (Phase 2)
+    let validated;
+    try {
+      validated = validateRescheduleReview(req.body);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return res.status(400).json({ message: err.message });
+      }
+      throw err;
     }
 
-    const review = await ReviewSession.findOne({
-      _id: reviewId,
-      advisor: advisorId,
-    });
-
-    if (!review) {
-      return res.status(404).json({ message: "Review not found" });
-    }
-
-    if (review.status === "completed" || review.status === "cancelled") {
-      return res.status(400).json({
-        message: `Cannot reschedule a ${review.status} review`
-      });
-    }
-
-    // Update reviewer if provided
-    if (reviewerId && reviewerId !== review.reviewer?.toString()) {
-      review.reviewer = reviewerId;
-    }
-
-    review.scheduledAt = new Date(scheduledAt);
-    review.status = "scheduled";
-    await review.save();
-
-    // Populate reviewer for response
-    await review.populate("reviewer", "name email");
-
-    // TODO: Send notifications if notifyParticipants is true
+    // Call service (Phase 3)
+    const review = await reviewService.rescheduleReview(reviewId, advisorId, validated);
 
     res.status(200).json({
       message: "Review rescheduled successfully",
@@ -364,6 +263,9 @@ exports.rescheduleReview = async (req, res) => {
       }
     });
   } catch (err) {
+    if (err instanceof ServiceError) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
     console.error("Reschedule Review Error:", err);
     res.status(500).json({ message: "Failed to reschedule review" });
   }
@@ -376,28 +278,26 @@ exports.cancelReview = async (req, res) => {
   try {
     const { reviewId } = req.params;
     const advisorId = req.user.id;
-    const { reason, notifyParticipants } = req.body;
 
-    if (!reason || reason.trim() === "") {
-      return res.status(400).json({ message: "Cancellation reason is required" });
+    // Validate input (Phase 2)
+    let validated;
+    try {
+      validated = validateCancelReview(req.body);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return res.status(400).json({ message: err.message });
+      }
+      throw err;
     }
 
-    const review = await ReviewSession.findOne({
-      _id: reviewId,
-      advisor: advisorId,
-    });
+    // Call service (Phase 3)
+    const review = await reviewService.cancelReview(reviewId, advisorId, validated.reason);
 
-    if (!review) return sendError(res, "Review not found", 404);
-    if (review.status === "completed") return sendError(res, "Cannot cancel a completed review", 400);
-    if (review.status === "cancelled") return sendError(res, "Review is already cancelled", 400);
-
-    review.status = "cancelled";
-    review.feedback = `Cancelled: ${reason}`;
-    await review.save();
-
-    // TODO: Send notifications if notifyParticipants is true
     sendSuccess(res, { reviewId: review._id }, "Review cancelled successfully");
   } catch (err) {
+    if (err instanceof ServiceError) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
     handleControllerError(res, err, "Cancel Review", "Failed to cancel review");
   }
 };
@@ -419,21 +319,14 @@ exports.acceptReviewByReviewer = async (req, res) => {
     const reviewerId = req.user.id;
     const { reviewId } = req.params;
 
-    const review = await ReviewSession.findOne({
-      _id: reviewId,
-      reviewer: reviewerId,
-    });
-
-    if (!review) return sendError(res, "Review not found", 404);
-    if (review.status !== "pending") {
-      return sendError(res, `Cannot accept a review with status: ${review.status}`, 400);
-    }
-
-    review.status = "accepted";
-    await review.save();
+    // Call service (Phase 3)
+    const review = await reviewService.acceptReview(reviewId, reviewerId);
 
     sendSuccess(res, { reviewId: review._id, status: review.status }, "Review accepted successfully");
   } catch (err) {
+    if (err instanceof ServiceError) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
     handleControllerError(res, err, "Accept Review", "Failed to accept review");
   }
 };
@@ -447,22 +340,14 @@ exports.rejectReviewByReviewer = async (req, res) => {
     const { reviewId } = req.params;
     const { reason } = req.body;
 
-    const review = await ReviewSession.findOne({
-      _id: reviewId,
-      reviewer: reviewerId,
-    });
-
-    if (!review) return sendError(res, "Review not found", 404);
-    if (review.status !== "pending") {
-      return sendError(res, `Cannot reject a review with status: ${review.status}`, 400);
-    }
-
-    review.status = "rejected";
-    if (reason) review.feedback = `Rejected: ${reason}`;
-    await review.save();
+    // Call service (Phase 3)
+    const review = await reviewService.rejectReview(reviewId, reviewerId, reason);
 
     sendSuccess(res, { reviewId: review._id, status: review.status }, "Review rejected successfully");
   } catch (err) {
+    if (err instanceof ServiceError) {
+      return res.status(err.statusCode).json({ message: err.message });
+    }
     handleControllerError(res, err, "Reject Review", "Failed to reject review");
   }
 };
@@ -704,7 +589,7 @@ exports.updateReviewerProfile = async (req, res) => {
 ====================================================== */
 exports.getReviewerDashboard = async (req, res) => {
   try {
-    const reviewerId = new mongoose.Types.ObjectId(req.user.id);
+    const reviewerId = toObjectId(req.user.id);
     const now = new Date();
 
     // Get all reviews for this reviewer
