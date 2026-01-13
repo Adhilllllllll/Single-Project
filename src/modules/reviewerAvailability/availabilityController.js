@@ -359,34 +359,38 @@ exports.getAvailabilityByDate = async (req, res) => {
     const currentTimeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const isToday = dayStart.toDateString() === now.toDateString();
 
-    // Filter out slots that are already booked OR have already passed (for today)
-    const availableSlots = slots.filter((slot) => {
-      // If target date is today, exclude slots where start time has passed
-      if (isToday && slot.startTime <= currentTimeStr) {
-        return false;
-      }
+    // Return slots with isBooked flag (filter out past slots for today only)
+    const slotsWithStatus = slots
+      .filter((slot) => {
+        // If target date is today, exclude slots where start time has passed
+        if (isToday && slot.startTime <= currentTimeStr) {
+          return false;
+        }
+        return true;
+      })
+      .map((slot) => {
+        // Check if this slot's time is already booked for this reviewer
+        const slotReviewerId = slot.reviewerId?._id?.toString() || slot.reviewerId?.toString();
 
-      // Check if this slot's time is already booked for this reviewer
-      const slotReviewerId = slot.reviewerId?._id?.toString() || slot.reviewerId?.toString();
+        const isBooked = existingReviews.some((review) => {
+          const reviewReviewerId = review.reviewer?.toString();
+          if (slotReviewerId !== reviewReviewerId) return false;
 
-      const isBooked = existingReviews.some((review) => {
-        const reviewReviewerId = review.reviewer?.toString();
-        if (slotReviewerId !== reviewReviewerId) return false;
+          // Compare times - the review is at scheduledAt time
+          const reviewTime = new Date(review.scheduledAt);
+          const reviewHour = reviewTime.getHours();
+          const reviewMinutes = reviewTime.getMinutes();
+          const reviewTimeStr = `${String(reviewHour).padStart(2, "0")}:${String(reviewMinutes).padStart(2, "0")}`;
 
-        // Compare times - the review is at scheduledAt time
-        const reviewTime = new Date(review.scheduledAt);
-        const reviewHour = reviewTime.getHours();
-        const reviewMinutes = reviewTime.getMinutes();
-        const reviewTimeStr = `${String(reviewHour).padStart(2, "0")}:${String(reviewMinutes).padStart(2, "0")}`;
+          // Check if review time falls within slot time
+          return reviewTimeStr >= slot.startTime && reviewTimeStr < slot.endTime;
+        });
 
-        // Check if review time falls within slot time
-        return reviewTimeStr >= slot.startTime && reviewTimeStr < slot.endTime;
+        // Return slot with isBooked flag
+        return { ...slot.toObject(), isBooked };
       });
 
-      return !isBooked;
-    });
-
-    return res.json(availableSlots);
+    return res.json(slotsWithStatus);
   } catch (err) {
     console.error("Get Availability By Date Error:", err);
     res.status(500).json({ message: "Server error" });

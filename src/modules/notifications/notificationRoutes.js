@@ -3,7 +3,7 @@ const notificationController = require("./notificationController");
 const authMiddleware = require("../../middlewares/authMiddleware");
 
 // Allow all user roles to access notifications
-const anyUserAuth = authMiddleware(["student", "advisor", "reviewer"]);
+const anyUserAuth = authMiddleware(["student", "advisor", "reviewer", "admin"]);
 
 /* =======================
    GET NOTIFICATIONS
