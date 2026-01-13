@@ -46,16 +46,46 @@ class ServiceError extends Error {
 
 /* ======================================================
    ADVISOR SERVICE FUNCTIONS
-====================================================== */
+   ====================================================== 
+   
+   ╔══════════════════════════════════════════════════════╗
+   ║  🔒 FROZEN FEATURE - AUTO-GENERATED MEETING LINKS   ║
+   ╠══════════════════════════════════════════════════════╣
+   ║  Status: COMPLETE - Phase 1                          ║
+   ║  Date: January 2026                                  ║
+   ║                                                      ║
+   ║  Meeting link format: /review-room/{reviewId}        ║
+   ║                                                      ║
+   ║  Phase-2 Integration Points:                         ║
+   ║  - reviewId → Socket.IO room ID                      ║
+   ║  - reviewId → WebRTC signaling room                  ║
+   ║  - /review-room/:reviewId → Video call UI            ║
+   ║                                                      ║
+   ║  DO NOT MODIFY unless implementing video calls.      ║
+   ╚══════════════════════════════════════════════════════╝
+*/
 
 /**
  * Create a new review session
- * @param {Object} data - Validated review data
+ * 
+ * MEETING LINK GENERATION POLICY:
+ * - Online mode: Server ALWAYS generates /review-room/{reviewId}
+ * - Offline mode: meetingLink is always null, location is required
+ * - Frontend cannot override meetingLink (enforced in validation layer)
+ * 
+ * FUTURE VIDEO CALL INTEGRATION:
+ * - reviewId = Socket.IO room ID
+ * - reviewId = WebRTC signaling room ID  
+ * - /review-room/{reviewId} route will serve video call UI
+ * - No schema changes needed
+ * 
+ * @param {Object} data - Validated review data (meetingLink NOT included)
  * @param {string} advisorId - Advisor creating the review
- * @returns {Promise<Object>} Created review
+ * @returns {Promise<Object>} Created review with generated meetingLink
  */
 async function createReview(data, advisorId) {
-    const { studentId, reviewerId, week, scheduledAt, mode, meetingLink, location } = data;
+    // Note: meetingLink is NOT destructured - it's server-generated only
+    const { studentId, reviewerId, week, scheduledAt, mode, location } = data;
 
     // Verify student exists
     const student = await Student.findById(studentId);
@@ -79,10 +109,15 @@ async function createReview(data, advisorId) {
         throw new ServiceError("Reviewer not found", 404);
     }
 
+    // Safety check: Offline mode MUST have location
+    if (mode === "offline" && !location) {
+        throw new ServiceError("Location is required for offline reviews", 400);
+    }
+
     // Get advisor info for email
     const advisor = await User.findById(advisorId);
 
-    // Create review session
+    // Create review session (meetingLink populated after for online mode)
     const review = await ReviewSession.create({
         student: studentId,
         advisor: advisorId,
@@ -90,9 +125,25 @@ async function createReview(data, advisorId) {
         week,
         scheduledAt: new Date(scheduledAt),
         mode,
-        meetingLink: mode === "online" ? meetingLink : null,
+        meetingLink: null, // Will be set below for online mode
         location: mode === "offline" ? location : null,
     });
+
+    // SERVER-ONLY: Generate meeting link for online mode
+    // Format: /review-room/{reviewId}
+    // This ID will serve as:
+    //   1. Route path for video call page
+    //   2. Socket.IO room identifier
+    //   3. WebRTC signaling room identifier
+    if (mode === "online") {
+        review.meetingLink = `/review-room/${review._id}`;
+        await review.save();
+    }
+
+    // Safety check: Online mode MUST have meetingLink after creation
+    if (mode === "online" && !review.meetingLink) {
+        throw new ServiceError("Failed to generate meeting link", 500);
+    }
 
     // Send email notifications (fire and forget)
     sendReviewAssignmentEmail({
@@ -103,7 +154,7 @@ async function createReview(data, advisorId) {
         advisorName: advisor?.name || "Advisor",
         scheduledAt: new Date(scheduledAt),
         mode,
-        meetingLink: mode === "online" ? meetingLink : null,
+        meetingLink: review.meetingLink,
         location: mode === "offline" ? location : null,
         week,
     }).catch(err => console.error("Email notification failed:", err.message));

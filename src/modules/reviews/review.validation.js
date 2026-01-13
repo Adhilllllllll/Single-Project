@@ -31,16 +31,42 @@ class ValidationError extends Error {
 
 /* ======================================================
    CREATE REVIEW VALIDATION
-====================================================== */
+   ====================================================== 
+   
+   ╔══════════════════════════════════════════════════════╗
+   ║  🔒 FROZEN FEATURE - AUTO-GENERATED MEETING LINKS   ║
+   ╠══════════════════════════════════════════════════════╣
+   ║  Status: COMPLETE - Phase 1                          ║
+   ║  Date: January 2026                                  ║
+   ║                                                      ║
+   ║  DO NOT MODIFY unless implementing Phase-2:          ║
+   ║  - WebRTC video calling                              ║
+   ║  - Socket.IO room management                         ║
+   ║                                                      ║
+   ║  The reviewId is intentionally used as room ID.     ║
+   ║  No schema/API changes required for video calls.    ║
+   ╚══════════════════════════════════════════════════════╝
+*/
 
 /**
  * Validate createReview request body
+ * 
+ * IMPORTANT: meetingLink is SERVER-GENERATED ONLY
+ * - For online mode: Auto-generated as /review-room/{reviewId} by service layer
+ * - For offline mode: Always null (location is used instead)
+ * - Frontend-provided meetingLink values are IGNORED for security
+ * 
+ * This design enables future WebRTC/Socket.IO integration:
+ * - reviewId serves as unique room identifier
+ * - No schema/API changes needed when video calling is implemented
+ * 
  * @param {Object} body - Request body
  * @returns {Object} Validated and sanitized data
  * @throws {ValidationError} If validation fails
  */
 const validateCreateReview = (body) => {
-    const { studentId, reviewerId, week, scheduledAt, mode, meetingLink, location } = body;
+    // Destructure WITHOUT meetingLink - it's server-generated only
+    const { studentId, reviewerId, week, scheduledAt, mode, location } = body;
 
     // Required fields check
     if (!studentId) throw new ValidationError("Student ID is required", "studentId");
@@ -54,19 +80,21 @@ const validateCreateReview = (body) => {
         throw new ValidationError("Invalid review mode. Must be 'online' or 'offline'", "mode");
     }
 
-    // Mode-specific validation
-    if (mode === "online" && !meetingLink) {
-        throw new ValidationError("Meeting link is required for online reviews", "meetingLink");
+    // Offline mode requires location
+    if (mode === "offline" && !location) {
+        throw new ValidationError("Location is required for offline reviews", "location");
     }
 
+    // Return validated data - meetingLink is NEVER passed from client
+    // Service layer will generate it for online mode
     return {
         studentId,
         reviewerId,
         week: parseInt(week, 10),
         scheduledAt: new Date(scheduledAt),
         mode,
-        meetingLink: mode === "online" ? meetingLink : null,
-        location: mode === "offline" ? location : null,
+        // meetingLink: null - explicitly NOT included, service generates it
+        location: mode === "offline" ? location.trim() : null,
     };
 };
 
