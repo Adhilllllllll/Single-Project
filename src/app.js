@@ -151,7 +151,6 @@
 
 // module.exports = app;
 
-
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
@@ -167,6 +166,12 @@ if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
 
+/**
+ * ✅ CONNECT DATABASE HERE (IMPORTANT FOR VERCEL)
+ */
+const connectDB = require("./config/database");
+connectDB();
+
 const app = express();
 
 /* =======================
@@ -175,7 +180,6 @@ const app = express();
 
 /**
  * ✅ CORS – Vercel safe
- * Uses ENV instead of hardcoded values
  */
 app.use(
   cors({
@@ -185,12 +189,6 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-/**
- * ❌ DO NOT use app.options("*")
- * It crashes path-to-regexp on Vercel (Linux)
- * CORS middleware already handles OPTIONS
- */
 
 /**
  * Security headers
@@ -219,8 +217,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 /**
- * Static uploads (safe for Vercel read-only FS)
- * NOTE: Only works for READ access (no uploads on Vercel)
+ * Static uploads (READ-ONLY on Vercel)
  */
 app.use(
   "/uploads",
