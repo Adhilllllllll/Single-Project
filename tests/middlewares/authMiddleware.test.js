@@ -3,7 +3,7 @@
  * Tests for JWT token validation and role-based access control
  */
 
-const authMiddleware = require('../../src/middlewares/authMiddleWare');
+const authMiddleware = require("../../src/middlewares/authMiddleware");
 const jwt = require('jsonwebtoken');
 
 // Test environment setup

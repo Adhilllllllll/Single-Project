@@ -152,16 +152,20 @@
 // module.exports = app;
 
 
-
-
-
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const path = require("path");
-require("dotenv").config();
+
+/**
+ * Load dotenv ONLY in local development
+ * (Vercel injects env vars automatically)
+ */
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
 
 const app = express();
 
@@ -169,23 +173,28 @@ const app = express();
    GLOBAL MIDDLEWARES
 ======================= */
 
-// ✅ CORS – Vercel safe (must be FIRST)
+/**
+ * ✅ CORS – Vercel safe
+ * Uses ENV instead of hardcoded values
+ */
 app.use(
   cors({
-    origin: [
-      "https://edunexus-client-one.vercel.app",
-      "http://localhost:5173",
-    ],
+    origin: process.env.FRONTEND_URL,
     credentials: false,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-// ✅ Explicit OPTIONS handling (CRITICAL)
-app.options("*", cors());
+/**
+ * ❌ DO NOT use app.options("*")
+ * It crashes path-to-regexp on Vercel (Linux)
+ * CORS middleware already handles OPTIONS
+ */
 
-// Security headers
+/**
+ * Security headers
+ */
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -193,23 +202,32 @@ app.use(
   })
 );
 
-// Request logging
+/**
+ * Request logging
+ */
 app.use(morgan("dev"));
 
-// Body parsers
+/**
+ * Body parsers
+ */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Cookies
+/**
+ * Cookies
+ */
 app.use(cookieParser());
 
-// Serve static files (uploads)
+/**
+ * Static uploads (safe for Vercel read-only FS)
+ * NOTE: Only works for READ access (no uploads on Vercel)
+ */
 app.use(
   "/uploads",
   (req, res, next) => {
     res.setHeader(
       "Access-Control-Allow-Origin",
-      "https://edunexus-client-one.vercel.app"
+      process.env.FRONTEND_URL
     );
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     next();
@@ -289,14 +307,9 @@ app.use((err, req, res, next) => {
   });
 });
 
+/**
+ * ✅ IMPORTANT:
+ * No app.listen()
+ * Export app for Vercel serverless
+ */
 module.exports = app;
-
-
-
-
-
-
-
-
-
-
