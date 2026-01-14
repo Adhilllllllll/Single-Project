@@ -14,9 +14,9 @@ const app = express();
 
 // CORS - must be first for preflight requests
 const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:5175",
+  // "http://localhost:5173",
+  // "http://localhost:5174",
+  // "http://localhost:5175",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
@@ -33,7 +33,6 @@ app.use(
     credentials: true,
   })
 );
-
 
 // Security headers (with cross-origin resource policy disabled for static files)
 app.use(
@@ -54,11 +53,15 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // Serve static files (uploads) with CORS headers
-app.use("/uploads", (req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  next();
-}, express.static(path.join(__dirname, "../uploads")));
+app.use(
+  "/uploads",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(path.join(__dirname, "../uploads"))
+);
 
 /* =======================
    SAFE ROUTE LOADER
@@ -85,7 +88,6 @@ const safeUse = (path, modulePath) => {
 /* =======================
    ROUTES
 ======================= */
-
 
 safeUse("/api/admin", "./modules/admin/adminRoutes");
 safeUse("/api/auth", "./modules/auth/authRoutes");
