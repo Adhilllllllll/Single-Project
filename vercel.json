@@ -5,7 +5,10 @@
       "src": "src/app.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["src/modules/**", "src/config/**", "src/middlewares/**", "src/utils/**"]
+        "bundle": false,
+        "includeFiles": [
+          "src/**"
+        ]
       }
     }
   ],
