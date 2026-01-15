@@ -16,9 +16,19 @@ const onlineUsers = new Map();
  * @param {http.Server} httpServer
  */
 const initializeSocket = (httpServer) => {
+    // Same allowed origins as app.js CORS config
+    const allowedOrigins = [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        process.env.FRONTEND_URL,
+        process.env.CLIENT_URL,
+        "https://edunexus-client-one.vercel.app",
+    ].filter(Boolean);
+
     const io = new Server(httpServer, {
         cors: {
-            origin: process.env.CLIENT_URL || "http://localhost:5173",
+            origin: allowedOrigins,
             methods: ["GET", "POST"],
             credentials: true,
         },
