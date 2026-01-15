@@ -2,11 +2,33 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Ensure uploads directory exists
+/**
+ * Check if running on Vercel (serverless environment with read-only filesystem)
+ * Vercel sets VERCEL=1 or process.env.VERCEL_ENV
+ */
+const isVercel = process.env.VERCEL === "1" || !!process.env.VERCEL_ENV;
+
+/**
+ * Safely create directory - handles read-only filesystem on Vercel
+ */
+const safeCreateDir = (dirPath) => {
+    if (isVercel) {
+        // Skip directory creation on Vercel (read-only filesystem)
+        console.log(`Skipping directory creation on Vercel: ${dirPath}`);
+        return;
+    }
+    try {
+        if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath, { recursive: true });
+        }
+    } catch (err) {
+        console.warn(`Could not create directory ${dirPath}:`, err.message);
+    }
+};
+
+// Ensure uploads directory exists (only in local development)
 const uploadsDir = path.join(__dirname, "../../uploads/avatars");
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
+safeCreateDir(uploadsDir);
 
 // Storage configuration
 const storage = multer.diskStorage({
@@ -41,9 +63,7 @@ const uploadAvatar = multer({
 
 // Task uploads directory
 const tasksDir = path.join(__dirname, "../../uploads/tasks");
-if (!fs.existsSync(tasksDir)) {
-    fs.mkdirSync(tasksDir, { recursive: true });
-}
+safeCreateDir(tasksDir);
 
 // Task storage configuration
 const taskStorage = multer.diskStorage({
@@ -86,9 +106,7 @@ const uploadTask = multer({
 
 // Materials uploads directory
 const materialsDir = path.join(__dirname, "../../uploads/materials");
-if (!fs.existsSync(materialsDir)) {
-    fs.mkdirSync(materialsDir, { recursive: true });
-}
+safeCreateDir(materialsDir);
 
 // Materials storage configuration
 const materialsStorage = multer.diskStorage({
@@ -113,9 +131,7 @@ const uploadMaterial = multer({
 
 // Documents uploads directory
 const documentsDir = path.join(__dirname, "../../uploads/documents");
-if (!fs.existsSync(documentsDir)) {
-    fs.mkdirSync(documentsDir, { recursive: true });
-}
+safeCreateDir(documentsDir);
 
 // Documents storage configuration
 const documentsStorage = multer.diskStorage({
