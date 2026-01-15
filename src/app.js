@@ -172,6 +172,23 @@ if (process.env.NODE_ENV !== "production") {
 const connectDB = require("./config/database");
 connectDB();
 
+/* =======================
+   STATIC ROUTE IMPORTS
+   (Required for Vercel NCC bundler to trace dependencies)
+======================= */
+const adminRoutes = require("./modules/admin/adminRoutes");
+const authRoutes = require("./modules/auth/authRoutes");
+const userRoutes = require("./modules/users/userRoutes");
+const availabilityRoutes = require("./modules/reviewerAvailability/availabilityRoutes");
+const reviewRoutes = require("./modules/reviews/reviewRoutes");
+const advisorRoutes = require("./modules/advisor/advisorRoutes");
+const taskRoutes = require("./modules/tasks/taskRoutes");
+const materialsRoutes = require("./modules/materials/materialsRoutes");
+const notificationRoutes = require("./modules/notifications/notificationRoutes");
+const studentRoutes = require("./modules/students/studentRoutes");
+const chatRoutes = require("./modules/chat/chatRoutes");
+const issueRoutes = require("./modules/issues/issueRoutes");
+
 const app = express();
 
 /* =======================
@@ -257,48 +274,24 @@ app.use(
 );
 
 /* =======================
-   SAFE ROUTE LOADER
+   ROUTE REGISTRATION
+   (Using statically imported routes for Vercel compatibility)
 ======================= */
 
-const safeUse = (routePath, modulePath) => {
-  try {
-    // Use path.join with __dirname for proper resolution on Vercel
-    const fullPath = path.join(__dirname, modulePath);
-    const route = require(fullPath);
+app.use("/api/admin", adminRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/reviewer/availability", availabilityRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/advisor", advisorRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/materials", materialsRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/students", studentRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/issues", issueRoutes);
 
-    if (typeof route !== "function") {
-      throw new Error(
-        `Route at ${modulePath} does not export an Express router`
-      );
-    }
-
-    app.use(routePath, route);
-    console.log(`✅ Loaded route: ${routePath}`);
-  } catch (err) {
-    console.error(`❌ Failed to load route: ${routePath}`);
-    console.error(err.message);
-  }
-};
-
-/* =======================
-   ROUTES
-======================= */
-
-safeUse("/api/admin", "./modules/admin/adminRoutes");
-safeUse("/api/auth", "./modules/auth/authRoutes");
-safeUse("/api/users", "./modules/users/userRoutes");
-safeUse(
-  "/api/reviewer/availability",
-  "./modules/reviewerAvailability/availabilityRoutes"
-);
-safeUse("/api/reviews", "./modules/reviews/reviewRoutes");
-safeUse("/api/advisor", "./modules/advisor/advisorRoutes");
-safeUse("/api/tasks", "./modules/tasks/taskRoutes");
-safeUse("/api/materials", "./modules/materials/materialsRoutes");
-safeUse("/api/notifications", "./modules/notifications/notificationRoutes");
-safeUse("/api/students", "./modules/students/studentRoutes");
-safeUse("/api/chat", "./modules/chat/chatRoutes");
-safeUse("/api/issues", "./modules/issues/issueRoutes");
+console.log("✅ All routes registered successfully");
 
 /* =======================
    HEALTH CHECK
