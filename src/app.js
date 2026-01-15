@@ -262,7 +262,9 @@ app.use(
 
 const safeUse = (routePath, modulePath) => {
   try {
-    const route = require(modulePath);
+    // Use path.join with __dirname for proper resolution on Vercel
+    const fullPath = path.join(__dirname, modulePath);
+    const route = require(fullPath);
 
     if (typeof route !== "function") {
       throw new Error(
