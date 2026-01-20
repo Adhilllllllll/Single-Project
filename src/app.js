@@ -204,7 +204,8 @@ const allowedOrigins = [
   "http://localhost:5174",
   "http://localhost:5175",
   process.env.FRONTEND_URL,
-  "https://edunexus-client-one.vercel.app",
+  // "https://edunexus-client-one.vercel.app",
+  "http://edunexuss.duckdns.org",
 ].filter(Boolean);
 
 app.use(
@@ -299,6 +300,18 @@ console.log("✅ All routes registered successfully");
 
 app.get("/", (req, res) => {
   res.status(200).send("RMS Backend Running");
+});
+
+/* =======================
+   HEALTH CHECK (API)
+======================= */
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+  });
 });
 
 /* =======================
