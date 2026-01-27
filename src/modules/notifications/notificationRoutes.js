@@ -68,5 +68,15 @@ router.get(
     notificationController.getAdminSentNotifications
 );
 
+/* =======================
+   ADMIN - CLEANUP OLD NOTIFICATIONS
+======================= */
+router.delete(
+    "/admin/cleanup",
+    authMiddleware("admin"),
+    notificationController.cleanupOldNotifications
+);
+
 module.exports = router;
+
 

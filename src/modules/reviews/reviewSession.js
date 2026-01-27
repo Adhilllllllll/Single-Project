@@ -72,4 +72,17 @@ reviewSessionSchema.index({ advisor: 1 });
 reviewSessionSchema.index({ reviewer: 1 });
 reviewSessionSchema.index({ student: 1, week: 1 });
 
+// === PHASE 2: Performance Indexes for Admin Dashboard ===
+// Supports: getRecentActivity ($sort by createdAt), getReviewStats (status aggregations)
+reviewSessionSchema.index({ createdAt: -1 });      // For recent activity sorting
+reviewSessionSchema.index({ scheduledAt: -1 });    // For scheduled reviews queries
+reviewSessionSchema.index({ status: 1 });          // For status-based filtering/grouping
+
+// === PHASE 3: Compound Indexes for Aggregation Queries ===
+// Supports: getPerformanceAnalytics, getReviewerDashboard $facet pipelines
+reviewSessionSchema.index({ reviewer: 1, status: 1, updatedAt: -1 });     // Reviewer stats + timeliness
+reviewSessionSchema.index({ reviewer: 1, scheduledAt: 1 });               // Reviewer upcoming reviews
+reviewSessionSchema.index({ student: 1, status: 1, scheduledAt: -1 });    // Student progress + history
+
 module.exports = mongoose.model("ReviewSession", reviewSessionSchema);
+

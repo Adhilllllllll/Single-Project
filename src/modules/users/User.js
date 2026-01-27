@@ -264,8 +264,12 @@ const userSchema = new mongoose.Schema(
 );
 
 /* -------- INDEXES -------- */
-userSchema.index({ email: 1 });
+userSchema.index({ email: 1 });   // Also enforced by unique: true
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
+
+// === PHASE 2: Performance Index for Admin Dashboard ===
+// Supports: getAllUsers ($sort by createdAt)
+userSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("User", userSchema);

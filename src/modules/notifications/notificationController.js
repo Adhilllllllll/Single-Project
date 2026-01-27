@@ -41,85 +41,76 @@ const MS_PER_HOUR = 60 * 60 * 1000;
 
 /* ======================================================
    GET USER NOTIFICATIONS
+   
+   REFACTORED: MongoDB-First Optimization
+   - REMOVED: Demo notification creation
+   - REMOVED: JS map() for formatting → $project in aggregation
+   - ADDED: Pagination support (page, limit)
+   - ADDED: Type and isRead filters
+   - REPLACED: JS filter for unreadCount → countDocuments
 ====================================================== */
 exports.getNotifications = async (req, res) => {
     try {
         const userId = new mongoose.Types.ObjectId(req.user.id);
 
-        let notifications = await Notification.find({ recipient: userId })
-            .sort({ createdAt: -1 })
-            .limit(50)
-            .lean();
+        // === PAGINATION PARAMS ===
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+        const skip = (page - 1) * limit;
 
-        // If no notifications exist, create sample notifications for demo
-        if (notifications.length === 0) {
-            const sampleNotifications = [
-                {
-                    recipient: userId,
-                    type: "review_reminder",
-                    title: "Review Reminder",
-                    message: "Your review session with Dr. Smith is scheduled for tomorrow at 2:00 PM",
-                    isRead: false,
-                    createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1 hour ago
-                },
-                {
-                    recipient: userId,
-                    type: "feedback_available",
-                    title: "New Feedback Available",
-                    message: "Dr. Smith has provided feedback on your project submission",
-                    isRead: false,
-                    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-                },
-                {
-                    recipient: userId,
-                    type: "new_message",
-                    title: "New Message",
-                    message: "Prof. Anderson: Your review is scheduled for tomorrow",
-                    isRead: true,
-                    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-                },
-                {
-                    recipient: userId,
-                    type: "task_deadline",
-                    title: "Task Deadline Approaching",
-                    message: "Submit Project Proposal is due in 2 days",
-                    isRead: true,
-                    createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // Yesterday
-                },
-                {
-                    recipient: userId,
-                    type: "review_completed",
-                    title: "Review Completed",
-                    message: "Your review session has been completed. View feedback now.",
-                    isRead: true,
-                    createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000), // 2 days ago
-                },
-            ];
+        // === FILTER PARAMS ===
+        const { type, isRead } = req.query;
 
-            await Notification.insertMany(sampleNotifications);
-            notifications = await Notification.find({ recipient: userId })
-                .sort({ createdAt: -1 })
-                .lean();
-        }
+        // Build match query
+        const matchQuery = { recipient: userId };
+        if (type) matchQuery.type = type;
+        if (isRead === "true") matchQuery.isRead = true;
+        if (isRead === "false") matchQuery.isRead = false;
 
-        // Format notifications
-        const formatted = notifications.map(n => ({
-            id: n._id,
-            type: n.type,
-            title: n.title,
-            message: n.message,
-            isRead: n.isRead,
-            readAt: n.readAt,
-            link: n.link,
-            createdAt: n.createdAt,
-        }));
+        // === SINGLE AGGREGATION - REPLACES find() + map() ===
+        // Previously: notifications.map(n => ({ id: n._id, ... }))
+        // Now: $project at DB level
+        const notifications = await Notification.aggregate([
+            { $match: matchQuery },
+            { $sort: { createdAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            {
+                $project: {
+                    id: "$_id",
+                    type: 1,
+                    title: 1,
+                    message: 1,
+                    isRead: 1,
+                    readAt: 1,
+                    link: 1,
+                    entityType: 1,
+                    entityId: 1,
+                    priority: 1,
+                    createdAt: 1,
+                    _id: 0,
+                },
+            },
+        ]);
 
-        // Count unread
-        const unreadCount = formatted.filter(n => !n.isRead).length;
+        // === GET UNREAD COUNT (Index-backed) ===
+        const unreadCount = await Notification.countDocuments({
+            recipient: userId,
+            isRead: false,
+        });
+
+        // === GET TOTAL FOR PAGINATION ===
+        const total = await Notification.countDocuments(matchQuery);
 
         res.status(200).json({
-            notifications: formatted,
+            notifications,
             unreadCount,
+            pagination: {
+                page,
+                limit,
+                total,
+                pages: Math.ceil(total / limit),
+            },
         });
     } catch (err) {
         console.error("GET NOTIFICATIONS ERROR:", err);
@@ -236,6 +227,10 @@ exports.createNotification = async (data) => {
 
 /* ======================================================
    ADMIN → SEND BROADCAST NOTIFICATION
+   
+   REFACTORED: MongoDB-First
+   - REPLACED: JS map() for recipient transformation → aggregation $project
+   - REPLACED: JS map() for notification building → bulkWrite with loop
 ====================================================== */
 const User = require("../users/User");
 const Student = require("../students/student");
@@ -260,40 +255,61 @@ exports.sendAdminNotification = async (req, res) => {
             });
         }
 
-        // Get recipients based on group
+        // === GET RECIPIENTS USING AGGREGATION ===
+        // Replaces: find().lean() + map() transformation
         let recipients = [];
 
         if (recipientGroup === "students") {
-            const students = await Student.find({ status: "active" }).select("_id").lean();
-            recipients = students.map(s => ({ id: s._id, model: "Student" }));
+            // Single aggregation with $project
+            recipients = await Student.aggregate([
+                { $match: { status: "active" } },
+                { $project: { id: "$_id", model: { $literal: "Student" }, _id: 0 } },
+            ]);
         } else if (recipientGroup === "reviewers") {
-            const reviewers = await User.find({ role: "reviewer", status: "active" }).select("_id").lean();
-            recipients = reviewers.map(u => ({ id: u._id, model: "User" }));
+            recipients = await User.aggregate([
+                { $match: { role: "reviewer", status: "active" } },
+                { $project: { id: "$_id", model: { $literal: "User" }, _id: 0 } },
+            ]);
         } else if (recipientGroup === "advisors") {
-            const advisors = await User.find({ role: "advisor", status: "active" }).select("_id").lean();
-            recipients = advisors.map(u => ({ id: u._id, model: "User" }));
+            recipients = await User.aggregate([
+                { $match: { role: "advisor", status: "active" } },
+                { $project: { id: "$_id", model: { $literal: "User" }, _id: 0 } },
+            ]);
         } else if (recipientGroup === "all_users") {
-            const users = await User.find({ status: "active", role: { $ne: "admin" } }).select("_id").lean();
-            const students = await Student.find({ status: "active" }).select("_id").lean();
-            recipients = [
-                ...users.map(u => ({ id: u._id, model: "User" })),
-                ...students.map(s => ({ id: s._id, model: "Student" })),
-            ];
+            // Use $unionWith to combine users and students in single pipeline
+            recipients = await User.aggregate([
+                { $match: { status: "active", role: { $ne: "admin" } } },
+                { $project: { id: "$_id", model: { $literal: "User" }, _id: 0 } },
+                {
+                    $unionWith: {
+                        coll: "students",
+                        pipeline: [
+                            { $match: { status: "active" } },
+                            { $project: { id: "$_id", model: { $literal: "Student" }, _id: 0 } },
+                        ],
+                    },
+                },
+            ]);
         }
 
-        // Create notifications for all recipients
-        const notifications = recipients.map(r => ({
-            recipient: r.id,
-            recipientModel: r.model,
-            senderId: adminId,
-            senderModel: "User",
-            isBroadcast: true,
-            recipientGroup,
-            type: "admin_broadcast",
-            title,
-            message,
-            isRead: false,
-            deliveryStatus: "delivered",
+        // === BUILD NOTIFICATIONS FOR BULK INSERT ===
+        // Using bulkWrite for efficiency (still requires array building, but optimized insert)
+        const bulkOps = recipients.map(r => ({
+            insertOne: {
+                document: {
+                    recipient: r.id,
+                    recipientModel: r.model,
+                    senderId: adminId,
+                    senderModel: "User",
+                    isBroadcast: true,
+                    recipientGroup,
+                    type: "admin_broadcast",
+                    title,
+                    message,
+                    isRead: false,
+                    deliveryStatus: "delivered",
+                },
+            },
         }));
 
         // Store a reference notification for admin tracking
@@ -311,9 +327,9 @@ exports.sendAdminNotification = async (req, res) => {
             },
         });
 
-        // Insert all notifications
-        if (notifications.length > 0) {
-            await Notification.insertMany(notifications);
+        // Bulk insert all notifications
+        if (bulkOps.length > 0) {
+            await Notification.bulkWrite(bulkOps);
         }
         await broadcastRef.save();
 
@@ -336,37 +352,90 @@ exports.sendAdminNotification = async (req, res) => {
 
 /* ======================================================
    ADMIN → GET SENT NOTIFICATIONS
+   
+   REFACTORED: MongoDB-First
+   - REPLACED: JS map() for formatting → aggregation $project
 ====================================================== */
 exports.getAdminSentNotifications = async (req, res) => {
     try {
         const adminId = new mongoose.Types.ObjectId(req.user.id);
 
-        // Get broadcast reference notifications (one per broadcast)
-        const notifications = await Notification.find({
-            senderId: adminId,
-            isBroadcast: true,
-            recipient: { $exists: false }, // Only get the reference notification
-        })
-            .sort({ createdAt: -1 })
-            .limit(50)
-            .lean();
-
-        // Format for frontend
-        const formatted = notifications.map(n => ({
-            id: n._id,
-            title: n.title,
-            message: n.message,
-            recipientGroup: n.recipientGroup,
-            dateSent: n.createdAt,
-            status: n.deliveryStatus,
-            recipientCount: n.metadata?.recipientCount || 0,
-        }));
+        // === SINGLE AGGREGATION - REPLACES find() + map() ===
+        // Previously: notifications.map(n => ({ id: n._id, ... }))
+        // Now: $project at DB level
+        const notifications = await Notification.aggregate([
+            {
+                $match: {
+                    senderId: adminId,
+                    isBroadcast: true,
+                    recipient: { $exists: false }, // Only reference notifications
+                },
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 50 },
+            {
+                $project: {
+                    id: "$_id",
+                    title: 1,
+                    message: 1,
+                    recipientGroup: 1,
+                    dateSent: "$createdAt",
+                    status: "$deliveryStatus",
+                    recipientCount: { $ifNull: ["$metadata.recipientCount", 0] },
+                    _id: 0,
+                },
+            },
+        ]);
 
         res.status(200).json({
-            notifications: formatted,
+            notifications,
         });
     } catch (err) {
         console.error("GET ADMIN SENT NOTIFICATIONS ERROR:", err);
         res.status(500).json({ message: "Failed to fetch sent notifications" });
+    }
+};
+
+/* ======================================================
+   ADMIN → CLEANUP OLD READ NOTIFICATIONS
+   DELETE /api/notifications/admin/cleanup
+   
+   PRODUCTION HARDENING:
+   - Deletes only read notifications older than 30 days
+   - Never touches unread notifications
+   - Safe to run as cron job or manual trigger
+====================================================== */
+exports.cleanupOldNotifications = async (req, res) => {
+    try {
+        // Only admin can trigger cleanup
+        if (req.user.role !== "admin") {
+            return res.status(403).json({ message: "Admin access required" });
+        }
+
+        // Default: 30 days, configurable via query param
+        const daysOld = Math.max(7, parseInt(req.query.daysOld) || 30);
+        const cutoffDate = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
+
+        // === SAFE DELETION ===
+        // Only delete: isRead=true AND readAt < cutoffDate
+        // This ensures unread notifications are NEVER deleted
+        const result = await Notification.deleteMany({
+            isRead: true,
+            readAt: { $lt: cutoffDate },
+        });
+
+        console.log(`[Cleanup] Deleted ${result.deletedCount} old read notifications (> ${daysOld} days)`);
+
+        res.status(200).json({
+            message: "Cleanup completed",
+            deletedCount: result.deletedCount,
+            criteria: {
+                daysOld,
+                cutoffDate,
+            },
+        });
+    } catch (err) {
+        console.error("CLEANUP NOTIFICATIONS ERROR:", err);
+        res.status(500).json({ message: "Failed to cleanup notifications" });
     }
 };

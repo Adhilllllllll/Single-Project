@@ -202,8 +202,12 @@ const studentSchema = new mongoose.Schema(
 );
 
 /* -------- INDEXES -------- */
-// studentSchema.index({ email: 1 });
+studentSchema.index({ email: 1 });    // Also enforced by unique: true
 studentSchema.index({ advisorId: 1 });
 studentSchema.index({ status: 1 });
+
+// === PHASE 2: Performance Index for Admin Dashboard ===
+// Supports: getAllUsers ($sort by createdAt), getRecentActivity
+studentSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("Student", studentSchema);

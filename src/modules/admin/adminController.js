@@ -96,83 +96,151 @@ exports.getDashboardCounts = async (req, res) => {
 /**
  * GET /api/admin/recent-activity
  * Get recent system activity for admin dashboard
+ * 
+ * PHASE 2 REFACTOR: Full MongoDB pipeline with $unionWith
+ * - REMOVED: JS array spread [...arr1, ...arr2, ...arr3]
+ * - REMOVED: JS array.sort() for combined activities
+ * - REMOVED: JS array.slice(0, 20) for limiting
+ * - ADDED: $unionWith to merge collections at DB level
+ * - ADDED: Final $sort + $limit in single pipeline
+ * 
+ * NOTE: formatRelativeTime() INTENTIONALLY kept in JS (requires runtime Date.now())
  */
 exports.getRecentActivity = async (req, res) => {
   try {
-    // Get recent reviews (last 2 weeks)
-    const recentReviews = await ReviewSession.find({})
-      .sort({ createdAt: -1 })
-      .limit(15)
-      .populate("student", "name")
-      .populate("reviewer", "name")
-      .lean();
+    // === SINGLE AGGREGATION PIPELINE WITH $unionWith ===
+    // Replaces: 3 separate queries + JS [...spread] + sort() + slice()
+    // MongoDB 8.0.17 supports $unionWith for cross-collection merging
 
-    // Get recently registered students (last 2 weeks)
-    const recentStudents = await Student.find({})
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .select("name createdAt")
-      .lean();
+    const allActivities = await ReviewSession.aggregate([
+      // === STAGE 1: Get Review Activities (Base Collection) ===
+      { $sort: { createdAt: -1 } },
+      { $limit: 15 },
+      {
+        $lookup: {
+          from: "students",
+          localField: "student",
+          foreignField: "_id",
+          as: "studentInfo",
+        },
+      },
+      { $unwind: { path: "$studentInfo", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          id: "$_id",
+          type: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$status", "completed"] }, then: "complete" },
+                { case: { $eq: ["$status", "pending"] }, then: "pending" },
+                { case: { $eq: ["$status", "accepted"] }, then: "add" },
+              ],
+              default: "pending",
+            },
+          },
+          message: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ["$status", "completed"] },
+                  then: {
+                    $concat: [
+                      "Review for ",
+                      { $ifNull: ["$studentInfo.name", "Student"] },
+                      " was completed.",
+                    ],
+                  },
+                },
+                {
+                  case: { $eq: ["$status", "pending"] },
+                  then: {
+                    $concat: [
+                      "Review for ",
+                      { $ifNull: ["$studentInfo.name", "Student"] },
+                      " is pending approval.",
+                    ],
+                  },
+                },
+                {
+                  case: { $eq: ["$status", "accepted"] },
+                  then: {
+                    $concat: [
+                      "Review for ",
+                      { $ifNull: ["$studentInfo.name", "Student"] },
+                      " was scheduled.",
+                    ],
+                  },
+                },
+              ],
+              default: {
+                $concat: [
+                  "Review for ",
+                  { $ifNull: ["$studentInfo.name", "Student"] },
+                  " is pending approval.",
+                ],
+              },
+            },
+          },
+          time: "$createdAt",
+        },
+      },
 
-    // Get recently added users (advisors/reviewers)
-    const recentUsers = await User.find({ role: { $in: ["advisor", "reviewer"] } })
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .select("name role createdAt")
-      .lean();
+      // === STAGE 2: $unionWith Students Collection ===
+      // Replaces: [...reviewActivities, ...studentActivities] spread
+      {
+        $unionWith: {
+          coll: "students",
+          pipeline: [
+            { $sort: { createdAt: -1 } },
+            { $limit: 10 },
+            {
+              $project: {
+                _id: 0,
+                id: "$_id",
+                type: { $literal: "register" },
+                message: { $concat: ["New student ", "$name", " was registered."] },
+                time: "$createdAt",
+              },
+            },
+          ],
+        },
+      },
 
-    // Combine and format activities
-    const activities = [];
+      // === STAGE 3: $unionWith Users Collection (advisors/reviewers) ===
+      // Replaces: [...combined, ...userActivities] spread
+      {
+        $unionWith: {
+          coll: "users",
+          pipeline: [
+            { $match: { role: { $in: ["advisor", "reviewer"] } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 10 },
+            {
+              $project: {
+                _id: 0,
+                id: "$_id",
+                type: { $literal: "add" },
+                message: { $concat: ["New ", "$role", " ", "$name", " was added."] },
+                time: "$createdAt",
+              },
+            },
+          ],
+        },
+      },
 
-    // Add review activities
-    recentReviews.forEach((review) => {
-      let type = "pending";
-      let message = "";
+      // === STAGE 4: Final Sort (Replaces: array.sort()) ===
+      // Previously: allActivities.sort((a, b) => new Date(b.time) - new Date(a.time))
+      { $sort: { time: -1 } },
 
-      if (review.status === "completed") {
-        type = "complete";
-        message = `Review for ${review.student?.name || "Student"} was completed.`;
-      } else if (review.status === "pending") {
-        type = "pending";
-        message = `Review for ${review.student?.name || "Student"} is pending approval.`;
-      } else if (review.status === "accepted") {
-        type = "add";
-        message = `Review for ${review.student?.name || "Student"} was scheduled.`;
-      }
+      // === STAGE 5: Final Limit (Replaces: array.slice(0, 20)) ===
+      // Previously: limitedActivities = allActivities.slice(0, 20)
+      { $limit: 20 },
+    ]);
 
-      activities.push({
-        id: review._id,
-        type,
-        message,
-        time: review.createdAt,
-      });
-    });
-
-    // Add student registrations
-    recentStudents.forEach((student) => {
-      activities.push({
-        id: student._id,
-        type: "register",
-        message: `New student ${student.name} was registered.`,
-        time: student.createdAt,
-      });
-    });
-
-    // Add user additions
-    recentUsers.forEach((user) => {
-      activities.push({
-        id: user._id,
-        type: "add",
-        message: `New ${user.role} ${user.name} was added.`,
-        time: user.createdAt,
-      });
-    });
-
-    // Sort by time descending and limit to 20
-    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
-    const limitedActivities = activities.slice(0, 20);
-
-    // Format time as relative
+    // === FORMAT RELATIVE TIME ===
+    // INTENTIONALLY KEPT IN JS: Requires dynamic Date.now() at response time
+    // Cannot be moved to MongoDB as it needs current server timestamp
     const formatRelativeTime = (date) => {
       const now = new Date();
       const diff = now - new Date(date);
@@ -187,7 +255,8 @@ exports.getRecentActivity = async (req, res) => {
       return `${days} days ago`;
     };
 
-    const formattedActivities = limitedActivities.map((act) => ({
+    // Transform time field only - all other shaping done at DB level
+    const formattedActivities = allActivities.map((act) => ({
       id: act.id,
       type: act.type,
       message: act.message,
@@ -472,6 +541,17 @@ exports.createUser = async (req, res) => {
     });
   } catch (err) {
     console.error("Create user error:", err);
+
+    // === PHASE 2: Race Condition Hardening ===
+    // Handle E11000 duplicate key error (race condition where two requests
+    // try to create user with same email simultaneously)
+    // The unique index on email will catch this even if findOne check passed
+    if (err.code === 11000 || err.name === "MongoServerError" && err.code === 11000) {
+      return res.status(400).json({
+        message: "A user with this email already exists",
+      });
+    }
+
     return res.status(500).json({
       message: "Server error",
       error: err.message,
@@ -482,70 +562,171 @@ exports.createUser = async (req, res) => {
 /**
  * Get all users with optional role filter
  * GET /api/admin/users?role=advisor|reviewer|student
+ * 
+ * PHASE 2 REFACTOR: $unionWith for cross-collection merging
+ * - REMOVED: JS array spread [...users, ...students]
+ * - REMOVED: JS array.sort() for combined users
+ * - ADDED: $unionWith to merge User + Student collections at DB level
+ * - ADDED: Final $sort in MongoDB pipeline
+ * 
+ * Strategy:
+ * - If role=student → query only Students
+ * - If role=advisor|reviewer → query only Users  
+ * - If no role → use $unionWith to merge both collections
  */
 exports.getAllUsers = async (req, res) => {
   try {
     const { role, search, status } = req.query;
 
-    let users = [];
-    let students = [];
-
-    // Build query filters
-    const userQuery = { role: { $ne: "admin" } };
-    const studentQuery = {};
+    // === BUILD MATCH CONDITIONS ===
+    // These will be used in aggregation $match stages
+    const userMatchConditions = { role: { $ne: "admin" } };
+    const studentMatchConditions = {};
 
     if (status) {
-      userQuery.status = status;
-      studentQuery.status = status;
+      userMatchConditions.status = status;
+      studentMatchConditions.status = status;
     }
 
-    // Get users based on role filter
-    if (!role || role === "advisor" || role === "reviewer") {
-      if (role) {
-        userQuery.role = role;
-      }
-      users = await User.find(userQuery)
-        .select("_id name email role domain status avatar createdAt")
-        .sort({ createdAt: -1 })
-        .lean();
-    }
-
-    if (!role || role === "student") {
-      students = await Student.find(studentQuery)
-        .select("_id name email batch course domain status avatar advisorId createdAt")
-        .populate("advisorId", "name")
-        .sort({ createdAt: -1 })
-        .lean();
-
-      // Format students to match user structure
-      students = students.map(s => ({
-        _id: s._id,
-        name: s.name,
-        email: s.email,
-        role: "student",
-        domain: s.domain || s.course || s.batch || "",
-        status: s.status,
-        avatar: s.avatar,
-        advisorName: s.advisorId?.name,
-        createdAt: s.createdAt,
-        isStudent: true,
-      }));
-    }
-
-    // Combine and apply search filter
-    let allUsers = [...users.map(u => ({ ...u, isStudent: false })), ...students];
-
+    // Search filter: Replaces JS filter() with MongoDB $regex
     if (search) {
-      const searchLower = search.toLowerCase();
-      allUsers = allUsers.filter(
-        u =>
-          u.name.toLowerCase().includes(searchLower) ||
-          u.email.toLowerCase().includes(searchLower)
-      );
+      const searchRegex = new RegExp(search, "i");
+      userMatchConditions.$or = [
+        { name: { $regex: searchRegex } },
+        { email: { $regex: searchRegex } },
+      ];
+      studentMatchConditions.$or = [
+        { name: { $regex: searchRegex } },
+        { email: { $regex: searchRegex } },
+      ];
     }
 
-    // Sort by creation date (newest first)
-    allUsers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    // Role filter for users
+    if (role === "advisor" || role === "reviewer") {
+      userMatchConditions.role = role;
+    }
+
+    let allUsers = [];
+
+    // === CASE 1: Only Students (role=student) ===
+    if (role === "student") {
+      allUsers = await Student.aggregate([
+        { $match: studentMatchConditions },
+        {
+          $lookup: {
+            from: "users",
+            localField: "advisorId",
+            foreignField: "_id",
+            as: "advisorInfo",
+          },
+        },
+        { $unwind: { path: "$advisorInfo", preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 1,
+            name: 1,
+            email: 1,
+            role: { $literal: "student" },
+            domain: {
+              $ifNull: [
+                "$domain",
+                { $ifNull: ["$course", { $ifNull: ["$batch", ""] }] },
+              ],
+            },
+            status: 1,
+            avatar: 1,
+            advisorName: "$advisorInfo.name",
+            createdAt: 1,
+            isStudent: { $literal: true },
+          },
+        },
+        { $sort: { createdAt: -1 } },
+      ]);
+    }
+    // === CASE 2: Only Users (role=advisor or role=reviewer) ===
+    else if (role === "advisor" || role === "reviewer") {
+      allUsers = await User.aggregate([
+        { $match: userMatchConditions },
+        {
+          $project: {
+            _id: 1,
+            name: 1,
+            email: 1,
+            role: 1,
+            domain: 1,
+            status: 1,
+            avatar: 1,
+            createdAt: 1,
+            isStudent: { $literal: false },
+          },
+        },
+        { $sort: { createdAt: -1 } },
+      ]);
+    }
+    // === CASE 3: All Users (no role filter) → Use $unionWith ===
+    // Replaces: [...users, ...students] + allUsers.sort()
+    else {
+      allUsers = await User.aggregate([
+        // Stage 1: Get Users (advisors, reviewers)
+        { $match: userMatchConditions },
+        {
+          $project: {
+            _id: 1,
+            name: 1,
+            email: 1,
+            role: 1,
+            domain: 1,
+            status: 1,
+            avatar: 1,
+            createdAt: 1,
+            isStudent: { $literal: false },
+          },
+        },
+
+        // Stage 2: $unionWith Students Collection
+        // Replaces: [...users, ...students] spread
+        {
+          $unionWith: {
+            coll: "students",
+            pipeline: [
+              { $match: studentMatchConditions },
+              {
+                $lookup: {
+                  from: "users",
+                  localField: "advisorId",
+                  foreignField: "_id",
+                  as: "advisorInfo",
+                },
+              },
+              { $unwind: { path: "$advisorInfo", preserveNullAndEmptyArrays: true } },
+              {
+                $project: {
+                  _id: 1,
+                  name: 1,
+                  email: 1,
+                  role: { $literal: "student" },
+                  domain: {
+                    $ifNull: [
+                      "$domain",
+                      { $ifNull: ["$course", { $ifNull: ["$batch", ""] }] },
+                    ],
+                  },
+                  status: 1,
+                  avatar: 1,
+                  advisorName: "$advisorInfo.name",
+                  createdAt: 1,
+                  isStudent: { $literal: true },
+                },
+              },
+            ],
+          },
+        },
+
+        // Stage 3: Final Sort (Replaces: array.sort())
+        // Previously: allUsers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        { $sort: { createdAt: -1 } },
+      ]);
+    }
 
     res.json({ users: allUsers });
   } catch (err) {
@@ -639,6 +820,11 @@ exports.updateUser = async (req, res) => {
 /**
  * Toggle user status (active/inactive)
  * PATCH /api/admin/users/:id/status
+ * 
+ * PHASE 2 REFACTOR: Atomic operation
+ * - REMOVED: findById → mutate → save (2 round trips)
+ * - ADDED: findOneAndUpdate with $cond (1 atomic operation)
+ * - Benefits: Fewer DB round trips, concurrency-safe
  */
 exports.toggleUserStatus = async (req, res) => {
   try {
@@ -646,20 +832,33 @@ exports.toggleUserStatus = async (req, res) => {
     const { type } = req.query; // 'student' or 'user'
 
     let user;
+    const Model = type === "student" ? Student : User;
 
-    if (type === "student") {
-      user = await Student.findById(id);
-    } else {
-      user = await User.findById(id);
-    }
+    // === ATOMIC STATUS TOGGLE ===
+    // Replaces: findById → read status → modify → save
+    // Uses MongoDB aggregation pipeline update (MongoDB 4.2+)
+    // The $cond operator toggles status in a single atomic operation
+    user = await Model.findByIdAndUpdate(
+      id,
+      [
+        {
+          $set: {
+            status: {
+              $cond: {
+                if: { $eq: ["$status", "active"] },
+                then: "inactive",
+                else: "active",
+              },
+            },
+          },
+        },
+      ],
+      { new: true } // Return updated document
+    ).lean();
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    // Toggle status
-    user.status = user.status === "active" ? "inactive" : "active";
-    await user.save();
 
     res.json({
       message: `User ${user.status === "active" ? "activated" : "deactivated"} successfully`,

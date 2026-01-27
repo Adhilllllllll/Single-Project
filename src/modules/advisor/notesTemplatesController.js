@@ -66,10 +66,14 @@ exports.createNote = async (req, res) => {
         const populatedNote = await Note.findById(note._id)
             .populate("studentId", "name email")
             .lean();
+          
 
         res.status(201).json({ message: "Note created", note: populatedNote });
     } catch (err) {
+          
         console.error("CREATE NOTE ERROR:", err);
+        console.log("hhhh"+populatedNote)
+        
         res.status(500).json({ message: "Failed to create note" });
     }
 };

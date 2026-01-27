@@ -394,6 +394,14 @@ exports.getSingleReviewByReviewer = async (req, res) => {
 
 /* ======================================================
    GET PERFORMANCE ANALYTICS – REVIEWER
+   
+   REFACTORED: MongoDB-First
+   - REMOVED: allReviews.filter() for completed reviews
+   - REMOVED: completedReviews.filter() for monthly/marks filtering  
+   - REMOVED: forEach() for timeliness counting
+   - REMOVED: forEach() for rating breakdown
+   - REMOVED: for loop for monthly reviews
+   - ADDED: Single $facet aggregation for all stats
 ====================================================== */
 exports.getPerformanceAnalytics = async (req, res) => {
   try {
@@ -402,79 +410,202 @@ exports.getPerformanceAnalytics = async (req, res) => {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-    // Get all reviews for this reviewer with lean() for performance
-    const allReviews = await ReviewSession.find({ reviewer: reviewerId }).lean();
-    const completedReviews = allReviews.filter(r => r.status === "completed");
+    // === SINGLE AGGREGATION WITH $facet ===
+    // Replaces: 15+ JS array operations (filter, forEach, reduce)
+    const [result] = await ReviewSession.aggregate([
+      // Stage 1: Match all reviews for this reviewer
+      { $match: { reviewer: reviewerId } },
 
-    // Total reviews
-    const totalReviews = completedReviews.length;
+      // Stage 2: $facet - compute all stats in parallel
+      {
+        $facet: {
+          // === Total completed count ===
+          // Replaces: completedReviews.length
+          totalCompleted: [
+            { $match: { status: "completed" } },
+            { $count: "count" },
+          ],
 
-    // Reviews this month
-    const reviewsThisMonth = completedReviews.filter(r =>
-      new Date(r.updatedAt) >= startOfMonth
-    ).length;
+          // === Reviews this month ===
+          // Replaces: completedReviews.filter(r => new Date(r.updatedAt) >= startOfMonth).length
+          reviewsThisMonth: [
+            {
+              $match: {
+                status: "completed",
+                updatedAt: { $gte: startOfMonth },
+              },
+            },
+            { $count: "count" },
+          ],
 
-    // Average rating (marks out of 10, convert to 5 scale)
-    const reviewsWithMarks = completedReviews.filter(r => r.marks !== undefined && r.marks !== null);
-    const avgRating = reviewsWithMarks.length > 0
-      ? Math.round((reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / reviewsWithMarks.length) * 10) / 10 / 2
-      : 0;
+          // === Average rating (marks/10 → rating/5) ===
+          // Replaces: reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / length
+          avgRating: [
+            {
+              $match: {
+                status: "completed",
+                marks: { $exists: true, $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                avg: { $avg: "$marks" },
+                count: { $sum: 1 },
+              },
+            },
+          ],
 
-    // On-time feedback calculation (within 24 hours of scheduledAt)
-    let onTimeCount = 0;
-    let within24Hours = 0;
-    let within48Hours = 0;
+          // === Timeliness (hours to complete) ===
+          // Replaces: completedReviews.forEach + hoursToComplete calculation
+          timeliness: [
+            { $match: { status: "completed" } },
+            {
+              $project: {
+                hoursToComplete: {
+                  $divide: [
+                    { $subtract: ["$updatedAt", "$scheduledAt"] },
+                    1000 * 60 * 60, // Convert ms to hours
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                within24Hours: {
+                  $sum: { $cond: [{ $lte: ["$hoursToComplete", 24] }, 1, 0] },
+                },
+                within48Hours: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $and: [
+                          { $gt: ["$hoursToComplete", 24] },
+                          { $lte: ["$hoursToComplete", 48] },
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                onTimeCount: {
+                  $sum: { $cond: [{ $lte: ["$hoursToComplete", 48] }, 1, 0] },
+                },
+                total: { $sum: 1 },
+              },
+            },
+          ],
 
-    completedReviews.forEach(r => {
-      if (r.scheduledAt && r.updatedAt) {
-        const hoursToComplete = (new Date(r.updatedAt) - new Date(r.scheduledAt)) / (1000 * 60 * 60);
-        if (hoursToComplete <= 24) {
-          onTimeCount++;
-          within24Hours++;
-        } else if (hoursToComplete <= 48) {
-          onTimeCount++;
-          within48Hours++;
-        }
-      }
-    });
+          // === Monthly reviews (last 6 months) ===
+          // Replaces: for loop with filter() for each month
+          monthlyReviews: [
+            {
+              $match: {
+                status: "completed",
+                updatedAt: { $gte: sixMonthsAgo },
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  year: { $year: "$updatedAt" },
+                  month: { $month: "$updatedAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+          ],
 
+          // === Active reviews (workload) ===
+          // Replaces: allReviews.filter(r => ["pending", "accepted", "scheduled"].includes(r.status)).length
+          activeReviews: [
+            { $match: { status: { $in: ["pending", "accepted", "scheduled"] } } },
+            { $count: "count" },
+          ],
+
+          // === Rating breakdown (convert marks 0-10 to stars 1-5) ===
+          // Replaces: reviewsWithMarks.forEach + star calculation
+          ratingBreakdown: [
+            {
+              $match: {
+                status: "completed",
+                marks: { $exists: true, $ne: null },
+              },
+            },
+            {
+              $project: {
+                stars: {
+                  $min: [
+                    5,
+                    { $max: [1, { $ceil: { $divide: ["$marks", 2] } }] },
+                  ],
+                },
+              },
+            },
+            {
+              $group: {
+                _id: "$stars",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    // === EXTRACT RESULTS (handle empty cases) ===
+    const totalReviews = result.totalCompleted[0]?.count || 0;
+    const reviewsThisMonth = result.reviewsThisMonth[0]?.count || 0;
+
+    // Average rating: marks/10 → 5-star scale
+    const avgData = result.avgRating[0];
+    const avgRating = avgData ? Math.round((avgData.avg / 2) * 10) / 10 : 0;
+    const totalRatings = avgData?.count || 0;
+
+    // Timeliness
+    const timeData = result.timeliness[0] || {};
+    const within24Hours = timeData.within24Hours || 0;
+    const within48Hours = timeData.within48Hours || 0;
+    const onTimeCount = timeData.onTimeCount || 0;
     const onTimePercentage = totalReviews > 0
       ? Math.round((onTimeCount / totalReviews) * 100)
       : 0;
 
-    // Monthly reviews (last 6 months)
+    // Monthly reviews - format with month names
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const monthlyReviews = [];
 
+    // Build last 6 months with 0s for missing months
     for (let i = 5; i >= 0; i--) {
-      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthNum = monthDate.getMonth() + 1; // 1-indexed
+      const yearNum = monthDate.getFullYear();
 
-      const count = completedReviews.filter(r => {
-        const reviewDate = new Date(r.updatedAt);
-        return reviewDate >= monthStart && reviewDate <= monthEnd;
-      }).length;
+      const found = result.monthlyReviews.find(
+        m => m._id.month === monthNum && m._id.year === yearNum
+      );
 
       monthlyReviews.push({
-        month: monthNames[monthStart.getMonth()],
-        count,
+        month: monthNames[monthDate.getMonth()],
+        count: found?.count || 0,
       });
     }
 
-    // Workload distribution
-    const activeReviews = allReviews.filter(r =>
-      ["pending", "accepted", "scheduled"].includes(r.status)
-    ).length;
-    const maxCapacity = 10; // Configurable
+    // Active reviews (workload)
+    const activeReviews = result.activeReviews[0]?.count || 0;
+    const maxCapacity = 10;
     const availableSlots = Math.max(0, maxCapacity - activeReviews);
     const currentLoadPercentage = Math.round((activeReviews / maxCapacity) * 100);
 
-    // Student satisfaction (rating breakdown)
-    // Convert marks (0-10) to stars (1-5)
+    // Rating breakdown - ensure all stars 1-5 are present
     const ratingBreakdown = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-    reviewsWithMarks.forEach(r => {
-      const stars = Math.min(5, Math.max(1, Math.ceil(r.marks / 2)));
-      ratingBreakdown[stars]++;
+    result.ratingBreakdown.forEach(r => {
+      if (r._id >= 1 && r._id <= 5) {
+        ratingBreakdown[r._id] = r.count;
+      }
     });
 
     res.status(200).json({
@@ -496,7 +627,7 @@ exports.getPerformanceAnalytics = async (req, res) => {
       },
       studentSatisfaction: {
         avgRating,
-        totalRatings: reviewsWithMarks.length,
+        totalRatings,
         ratingBreakdown,
       },
     });
@@ -505,6 +636,7 @@ exports.getPerformanceAnalytics = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch performance analytics" });
   }
 };
+
 
 /* ======================================================
    GET REVIEWER PROFILE
@@ -586,92 +718,194 @@ exports.updateReviewerProfile = async (req, res) => {
 
 /* ======================================================
    REVIEWER DASHBOARD DATA
+   
+   REFACTORED: MongoDB-First
+   - REMOVED: allReviews.filter() for week/status filtering
+   - REMOVED: allReviews.filter().slice().map() chains
+   - REMOVED: reduce() for average calculation
+   - ADDED: Single $facet aggregation for stats + lists
+   - ADDED: $lookup for student/advisor population
 ====================================================== */
 exports.getReviewerDashboard = async (req, res) => {
   try {
     const reviewerId = toObjectId(req.user.id);
     const now = new Date();
 
-    // Get all reviews for this reviewer
-    const allReviews = await ReviewSession.find({ reviewer: reviewerId })
-      .populate("student", "name email")
-      .populate("advisor", "name email")
-      .sort({ scheduledAt: 1 });
-
-    // 1. Reviews This Week (scheduled reviews in current week)
+    // Calculate week boundaries
     const startOfWeek = new Date(now);
     startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
     startOfWeek.setHours(0, 0, 0, 0);
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 7);
 
-    const reviewsThisWeek = allReviews.filter((r) => {
-      const scheduledDate = new Date(r.scheduledAt);
-      return (
-        scheduledDate >= startOfWeek &&
-        scheduledDate < endOfWeek &&
-        ["scheduled", "accepted", "pending"].includes(r.status)
-      );
-    }).length;
+    // === SINGLE AGGREGATION WITH $facet ===
+    // Replaces: 10 JS array operations (filter, slice, map, reduce)
+    const [result] = await ReviewSession.aggregate([
+      // Stage 1: Match all reviews for this reviewer
+      { $match: { reviewer: reviewerId } },
 
-    // 2. Pending Feedback (completed but no marks/feedback)
-    const pendingFeedbackReviews = allReviews.filter(
-      (r) => r.status === "completed" && (r.marks === undefined || r.marks === null)
-    );
+      // Stage 2: $facet - compute all stats + lists in parallel
+      {
+        $facet: {
+          // === Reviews this week count ===
+          // Replaces: allReviews.filter(r => date >= startOfWeek && date < endOfWeek && status in [...]).length
+          reviewsThisWeek: [
+            {
+              $match: {
+                scheduledAt: { $gte: startOfWeek, $lt: endOfWeek },
+                status: { $in: ["scheduled", "accepted", "pending"] },
+              },
+            },
+            { $count: "count" },
+          ],
 
-    // 3. Total Completed
-    const totalCompleted = allReviews.filter((r) => r.status === "completed").length;
+          // === Pending feedback count ===
+          // Replaces: allReviews.filter(r => status === "completed" && marks === undefined).length
+          pendingFeedback: [
+            {
+              $match: {
+                status: "completed",
+                $or: [
+                  { marks: { $exists: false } },
+                  { marks: null },
+                ],
+              },
+            },
+            { $count: "count" },
+          ],
 
-    // 4. Average Rating (from marks 0-10, converted to 0-5 scale)
-    const reviewsWithMarks = allReviews.filter(
-      (r) => r.status === "completed" && r.marks !== undefined && r.marks !== null
-    );
-    const avgRating =
-      reviewsWithMarks.length > 0
-        ? (reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / reviewsWithMarks.length / 2).toFixed(1)
-        : 0;
+          // === Total completed ===
+          // Replaces: allReviews.filter(r => r.status === "completed").length
+          totalCompleted: [
+            { $match: { status: "completed" } },
+            { $count: "count" },
+          ],
 
-    // 5. Upcoming Reviews (scheduled/accepted, future dates, limit 5)
-    const upcomingReviews = allReviews
-      .filter(
-        (r) =>
-          ["scheduled", "accepted"].includes(r.status) &&
-          new Date(r.scheduledAt) >= now
-      )
-      .slice(0, 5)
-      .map((r) => ({
-        _id: r._id,
-        student: r.student,
-        advisor: r.advisor,
-        scheduledAt: r.scheduledAt,
-        status: r.status,
-        mode: r.mode,
-        meetingLink: r.meetingLink,
-      }));
+          // === Average rating ===
+          // Replaces: reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / length / 2
+          avgRating: [
+            {
+              $match: {
+                status: "completed",
+                marks: { $exists: true, $ne: null },
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                avg: { $avg: "$marks" },
+              },
+            },
+          ],
 
-    // 6. Pending Feedback list (limit 5)
-    const pendingFeedbackList = pendingFeedbackReviews.slice(0, 5).map((r) => ({
-      _id: r._id,
-      student: r.student,
-      scheduledAt: r.scheduledAt,
-      updatedAt: r.updatedAt,
-    }));
+          // === Upcoming reviews (limit 5) ===
+          // Replaces: allReviews.filter().slice(0, 5).map()
+          upcomingReviews: [
+            {
+              $match: {
+                status: { $in: ["scheduled", "accepted"] },
+                scheduledAt: { $gte: now },
+              },
+            },
+            { $sort: { scheduledAt: 1 } },
+            { $limit: 5 },
+            // Lookup student
+            {
+              $lookup: {
+                from: "students",
+                localField: "student",
+                foreignField: "_id",
+                as: "studentData",
+                pipeline: [{ $project: { name: 1, email: 1 } }],
+              },
+            },
+            // Lookup advisor
+            {
+              $lookup: {
+                from: "users",
+                localField: "advisor",
+                foreignField: "_id",
+                as: "advisorData",
+                pipeline: [{ $project: { name: 1, email: 1 } }],
+              },
+            },
+            // Format output
+            {
+              $project: {
+                _id: 1,
+                student: { $arrayElemAt: ["$studentData", 0] },
+                advisor: { $arrayElemAt: ["$advisorData", 0] },
+                scheduledAt: 1,
+                status: 1,
+                mode: 1,
+                meetingLink: 1,
+              },
+            },
+          ],
+
+          // === Pending feedback list (limit 5) ===
+          // Replaces: pendingFeedbackReviews.slice(0, 5).map()
+          pendingFeedbackList: [
+            {
+              $match: {
+                status: "completed",
+                $or: [
+                  { marks: { $exists: false } },
+                  { marks: null },
+                ],
+              },
+            },
+            { $sort: { updatedAt: -1 } },
+            { $limit: 5 },
+            // Lookup student
+            {
+              $lookup: {
+                from: "students",
+                localField: "student",
+                foreignField: "_id",
+                as: "studentData",
+                pipeline: [{ $project: { name: 1, email: 1 } }],
+              },
+            },
+            // Format output
+            {
+              $project: {
+                _id: 1,
+                student: { $arrayElemAt: ["$studentData", 0] },
+                scheduledAt: 1,
+                updatedAt: 1,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    // === EXTRACT RESULTS ===
+    const reviewsThisWeek = result.reviewsThisWeek[0]?.count || 0;
+    const pendingFeedback = result.pendingFeedback[0]?.count || 0;
+    const totalCompleted = result.totalCompleted[0]?.count || 0;
+
+    // Average rating: marks/10 → 5-star scale
+    const avgData = result.avgRating[0];
+    const avgRating = avgData ? parseFloat((avgData.avg / 2).toFixed(1)) : 0;
 
     res.status(200).json({
       stats: {
         reviewsThisWeek,
-        pendingFeedback: pendingFeedbackReviews.length,
+        pendingFeedback,
         totalCompleted,
-        avgRating: parseFloat(avgRating),
+        avgRating,
       },
-      upcomingReviews,
-      pendingFeedbackList,
+      upcomingReviews: result.upcomingReviews,
+      pendingFeedbackList: result.pendingFeedbackList,
     });
   } catch (err) {
     console.error("REVIEWER DASHBOARD ERROR:", err);
     res.status(500).json({ message: "Failed to fetch dashboard data" });
   }
 };
+
 
 /* ========================================================================
    4. STUDENT FLOWS
@@ -768,42 +1002,80 @@ exports.getStudentUpcomingReviews = async (req, res) => {
 
 /* ======================================================
    GET STUDENT REVIEW HISTORY
+   
+   REFACTORED: MongoDB-First
+   - REMOVED: completedReviews.map() for formatting
+   - ADDED: $project with $cond for score calculation
+   - ADDED: $lookup for reviewer/advisor population
 ====================================================== */
 exports.getStudentReviewHistory = async (req, res) => {
   try {
     const studentId = new mongoose.Types.ObjectId(req.user.id);
 
-    // Fetch completed and scored reviews
-    const completedReviews = await ReviewSession.find({
-      student: studentId,
-      status: { $in: ["completed", "scored"] },
-    })
-      .populate("reviewer", "name email")
-      .populate("advisor", "name email")
-      .sort({ updatedAt: -1 })
-      .lean();
+    // === AGGREGATION WITH $project FOR FORMATTING ===
+    // Replaces: completedReviews.map(r => ({ ... }))
+    const reviewHistory = await ReviewSession.aggregate([
+      // Match completed/scored reviews for this student
+      {
+        $match: {
+          student: studentId,
+          status: { $in: ["completed", "scored"] },
+        },
+      },
+      // Sort by completion date descending
+      { $sort: { updatedAt: -1 } },
+      // Lookup reviewer
+      {
+        $lookup: {
+          from: "users",
+          localField: "reviewer",
+          foreignField: "_id",
+          as: "reviewerData",
+          pipeline: [{ $project: { name: 1, email: 1 } }],
+        },
+      },
+      // Lookup advisor
+      {
+        $lookup: {
+          from: "users",
+          localField: "advisor",
+          foreignField: "_id",
+          as: "advisorData",
+          pipeline: [{ $project: { name: 1, email: 1 } }],
+        },
+      },
+      // Project final format
+      // Replaces: .map(r => ({ _id, reviewer, advisor, score: Math.round(r.marks * 10), ... }))
+      {
+        $project: {
+          _id: 1,
+          reviewer: { $arrayElemAt: ["$reviewerData", 0] },
+          advisor: { $arrayElemAt: ["$advisorData", 0] },
+          scheduledAt: 1,
+          completedAt: "$updatedAt",
+          status: 1,
+          marks: 1,
+          // Convert marks (0-10) to percentage
+          score: {
+            $cond: [
+              { $and: [{ $ne: ["$marks", null] }, { $type: "$marks" }] },
+              { $round: [{ $multiply: ["$marks", 10] }, 0] },
+              null,
+            ],
+          },
+          feedback: 1,
+          week: 1,
+        },
+      },
+    ]);
 
-    // Format response with score calculation
-    const formatted = completedReviews.map((r) => ({
-      _id: r._id,
-      reviewer: r.reviewer,
-      advisor: r.advisor,
-      scheduledAt: r.scheduledAt,
-      completedAt: r.updatedAt,
-      status: r.status,
-      marks: r.marks,
-      // Convert marks (0-10) to percentage
-      score: r.marks !== undefined && r.marks !== null ? Math.round(r.marks * 10) : null,
-      feedback: r.feedback,
-      week: r.week,
-    }));
-
-    res.status(200).json({ reviewHistory: formatted });
+    res.status(200).json({ reviewHistory });
   } catch (err) {
     console.error("STUDENT REVIEW HISTORY ERROR:", err);
     res.status(500).json({ message: "Failed to fetch review history" });
   }
 };
+
 
 /* ======================================================
    GET STUDENT REVIEW REPORT
@@ -885,67 +1157,149 @@ exports.getStudentReviewReport = async (req, res) => {
 
 /* ======================================================
    GET STUDENT PROGRESS DATA
+   
+   REFACTORED: MongoDB-First
+   - REMOVED: allReviews.filter() for completed status
+   - REMOVED: completedReviews.filter() for marks filter
+   - REMOVED: reduce() for average calculation
+   - REMOVED: filter().map().sort() for weekly progress
+   - ADDED: $facet aggregation for stats
+   - ADDED: $project with $cond for severity calculation
+   - KEPT: Text processing for improvement areas (appropriate for JS)
 ====================================================== */
 exports.getStudentProgress = async (req, res) => {
   try {
     const studentId = new mongoose.Types.ObjectId(req.user.id);
 
-    // Fetch all reviews for this student
-    const allReviews = await ReviewSession.find({ student: studentId })
-      .populate("reviewer", "name")
-      .sort({ scheduledAt: 1 })
-      .lean();
+    // === AGGREGATION FOR STATS + WEEKLY PROGRESS ===
+    // Replaces: filter, reduce, map operations on fetched data
+    const [result] = await ReviewSession.aggregate([
+      { $match: { student: studentId } },
 
-    // Total reviews and completed/scored count
-    const totalReviews = allReviews.length;
-    const completedReviews = allReviews.filter(r => r.status === "completed" || r.status === "scored");
-    const completedCount = completedReviews.length;
+      {
+        $facet: {
+          // === Total reviews count ===
+          // Replaces: allReviews.length
+          totalCount: [{ $count: "count" }],
 
-    // Calculate average score (marks are 0-10, convert to percentage)
-    const reviewsWithMarks = completedReviews.filter(
-      r => r.marks !== undefined && r.marks !== null
-    );
-    const avgScore = reviewsWithMarks.length > 0
-      ? Math.round(reviewsWithMarks.reduce((sum, r) => sum + r.marks, 0) / reviewsWithMarks.length * 10)
-      : 0;
+          // === Completed/scored count and average ===
+          // Replaces: completedReviews.filter().length + reduce() for avg
+          completedStats: [
+            { $match: { status: { $in: ["completed", "scored"] } } },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+                avgMarks: {
+                  $avg: {
+                    $cond: [
+                      { $and: [{ $ne: ["$marks", null] }, { $type: "$marks" }] },
+                      "$marks",
+                      null,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
 
-    // Overall progress percentage (completed / total * 100)
+          // === Weekly progress (completed with marks) ===
+          // Replaces: allReviews.filter().map().sort()
+          weeklyProgress: [
+            {
+              $match: {
+                status: { $in: ["completed", "scored"] },
+                marks: { $exists: true, $ne: null },
+              },
+            },
+            { $sort: { week: 1 } },
+            {
+              $project: {
+                week: 1,
+                score: { $round: [{ $multiply: ["$marks", 10] }, 0] },
+                date: "$scheduledAt",
+                // Severity: ≥8 green, 6-7 yellow, <6 red
+                severity: {
+                  $switch: {
+                    branches: [
+                      { case: { $gte: ["$marks", 8] }, then: "green" },
+                      { case: { $gte: ["$marks", 6] }, then: "yellow" },
+                    ],
+                    default: "red",
+                  },
+                },
+              },
+            },
+          ],
+
+          // === Milestones (all reviews) ===
+          // Replaces: allReviews.map()
+          milestones: [
+            { $sort: { scheduledAt: 1 } },
+            {
+              $lookup: {
+                from: "users",
+                localField: "reviewer",
+                foreignField: "_id",
+                as: "reviewerData",
+                pipeline: [{ $project: { name: 1 } }],
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                title: { $concat: ["Week ", { $toString: "$week" }, " Review"] },
+                date: "$scheduledAt",
+                status: 1,
+                reviewer: { $arrayElemAt: ["$reviewerData.name", 0] },
+                score: {
+                  $cond: [
+                    { $and: [{ $ne: ["$marks", null] }, { $type: "$marks" }] },
+                    { $round: [{ $multiply: ["$marks", 10] }, 0] },
+                    null,
+                  ],
+                },
+              },
+            },
+          ],
+
+          // === Completed reviews with feedback (for text processing) ===
+          // This minimal projection fetches only what's needed for JS text processing
+          feedbackData: [
+            {
+              $match: {
+                status: { $in: ["completed", "scored"] },
+                feedback: { $exists: true, $ne: "" },
+              },
+            },
+            {
+              $project: {
+                feedback: 1,
+                marks: 1,
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    // === EXTRACT STATS ===
+    const totalReviews = result.totalCount[0]?.count || 0;
+    const completedCount = result.completedStats[0]?.count || 0;
+    const avgMarks = result.completedStats[0]?.avgMarks || 0;
+    const avgScore = avgMarks > 0 ? Math.round(avgMarks * 10) : 0;
+
     const overallProgress = totalReviews > 0
       ? Math.round((completedCount / totalReviews) * 100)
       : 0;
 
-    // Progress over time (weekly scores) - include completed and scored
-    const weeklyProgress = allReviews
-      .filter(r => (r.status === "completed" || r.status === "scored") && r.marks !== undefined)
-      .map(r => {
-        const score = Math.round(r.marks * 10);
-        return {
-          week: r.week,
-          score,
-          date: r.scheduledAt,
-          // Severity based on marks (0-10 scale): ≥8 green, 6-7 yellow, <6 red
-          severity: r.marks >= 8 ? "green" : r.marks >= 6 ? "yellow" : "red",
-        };
-      })
-      .sort((a, b) => a.week - b.week);
-
-    // Learning milestones (all reviews as milestones)
-    const milestones = allReviews.map(r => ({
-      _id: r._id,
-      title: `Week ${r.week} Review`,
-      date: r.scheduledAt,
-      status: r.status,
-      reviewer: r.reviewer?.name,
-      score: r.marks !== undefined ? Math.round(r.marks * 10) : null,
-    }));
-
-    // Calculate improvement areas from feedback
+    // === IMPROVEMENT AREAS (Text processing - stays in JS) ===
+    // This is appropriate for JS as it's string manipulation
     const improvementAreas = [];
     const uniqueFeedback = new Set();
 
-    completedReviews.forEach(r => {
+    result.feedbackData.forEach(r => {
       if (r.feedback && r.feedback.trim()) {
-        // Split feedback into sentences and extract actionable items
         const sentences = r.feedback.split(/[.!?]/).filter(s => s.trim());
         sentences.forEach(s => {
           const trimmed = s.trim();
@@ -959,10 +1313,10 @@ exports.getStudentProgress = async (req, res) => {
       }
     });
 
-    // If no feedback, add default improvement areas based on low scores
+    // Default suggestions if no feedback extracted
     if (improvementAreas.length === 0) {
-      const lowScoreReviews = reviewsWithMarks.filter(r => r.marks < 7);
-      if (lowScoreReviews.length > 0) {
+      const hasLowScores = result.feedbackData.some(r => r.marks !== undefined && r.marks < 7);
+      if (hasLowScores) {
         improvementAreas.push("Focus on areas with lower scores");
         improvementAreas.push("Review feedback from completed sessions");
         improvementAreas.push("Practice consistently before reviews");
@@ -976,8 +1330,8 @@ exports.getStudentProgress = async (req, res) => {
         totalMilestones: totalReviews,
         avgScore,
       },
-      weeklyProgress,
-      milestones,
+      weeklyProgress: result.weeklyProgress,
+      milestones: result.milestones,
       improvementAreas,
     });
   } catch (err) {
@@ -985,6 +1339,7 @@ exports.getStudentProgress = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch progress data" });
   }
 };
+
 
 /* ======================================================
    MARK REVIEW AS COMPLETED + SUBMIT EVALUATION – REVIEWER

@@ -108,6 +108,10 @@ const notificationSocketHandler = (io, socket, onlineUsers) => {
 
 /**
  * Send a notification to a user (called from REST controllers)
+ * 
+ * Uses shared upsertNotificationWithDedup for deduplication
+ * (Single source of truth in notification.service.js)
+ * 
  * @param {string} recipientId - User ID to send notification to
  * @param {object} notificationData - Notification payload
  * @param {boolean} saveToDb - Whether to save to database
@@ -118,12 +122,17 @@ const sendNotification = async (recipientId, notificationData, saveToDb = true) 
 
         // Save to database if needed
         if (saveToDb) {
-            notification = await Notification.create({
+            // === USE SHARED DEDUP HELPER ===
+            // Import from notification.service.js (single source of truth)
+            const { upsertNotificationWithDedup } = require("../modules/notifications/notification.service");
+
+            notification = await upsertNotificationWithDedup({
                 recipient: recipientId,
                 ...notificationData,
                 deliveryStatus: "pending",
             });
         }
+
 
         // Check if user is online
         const isOnline = global.onlineUsers?.has(recipientId) &&
@@ -154,6 +163,7 @@ const sendNotification = async (recipientId, notificationData, saveToDb = true) 
         return null;
     }
 };
+
 
 /**
  * Broadcast notification to multiple users

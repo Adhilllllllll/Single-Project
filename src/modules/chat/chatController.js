@@ -5,6 +5,14 @@ const User = require("../users/User");
 const Student = require("../students/student");
 const ReviewSession = require("../reviews/reviewSession");
 
+// === NOTIFICATION SERVICE ===
+// Fire-and-forget notification triggers for chat events
+const {
+    notifyChatRequestCreated,
+    notifyChatRequestApproved,
+    notifyChatRequestRejected,
+} = require("../notifications/notification.service");
+
 /**
  * Validate if two users can chat (outside review sessions)
  * Reviewer ↔ Student requires approved ChatRequest
@@ -54,38 +62,111 @@ const getUserInfo = async (userId) => {
 /* ======================================================
    GET ALL CONVERSATIONS
    GET /api/chat/conversations
+   
+   REFACTORED: N+1 Fix
+   - REMOVED: Promise.all + map with async getUserInfo calls (N+1 queries)
+   - ADDED: Single aggregation with $lookup to both users and students
+   - All participant resolution now happens at DB level
 ====================================================== */
 exports.getConversations = async (req, res) => {
     try {
         const userId = req.user.id;
+        const userObjectId = new (require("mongoose").Types.ObjectId)(userId);
 
-        const conversations = await Conversation.find({
-            participants: userId,
-            isActive: true,
-        })
-            .sort({ lastMessageAt: -1 })
-            .lean();
+        // === SINGLE AGGREGATION - REPLACES N+1 PATTERN ===
+        // Previously: conversations.map(async (conv) => { await getUserInfo(...) })
+        // Now: All lookups happen in one pipeline
+        const conversations = await Conversation.aggregate([
+            // Stage 1: Match user's active conversations
+            { $match: { participants: userObjectId, isActive: true } },
 
-        // Populate participant info manually (since we have mixed models)
-        const populatedConversations = await Promise.all(
-            conversations.map(async (conv) => {
-                const otherParticipantId = conv.participants.find(
-                    (p) => p.toString() !== userId
-                );
-                const otherInfo = await getUserInfo(otherParticipantId);
+            // Stage 2: Sort by last message (Replaces: .sort({ lastMessageAt: -1 }))
+            { $sort: { lastMessageAt: -1 } },
 
-                return {
-                    _id: conv._id,
-                    otherParticipant: otherInfo?.user || { name: "Unknown" },
-                    lastMessage: conv.lastMessage,
-                    lastMessageAt: conv.lastMessageAt,
-                    unreadCount: conv.unreadCount?.get?.(userId) || conv.unreadCount?.[userId] || 0,
-                    createdAt: conv.createdAt,
-                };
-            })
-        );
+            // Stage 3: Extract other participant ID
+            // Replaces: conv.participants.find(p => p.toString() !== userId)
+            {
+                $addFields: {
+                    otherParticipantId: {
+                        $arrayElemAt: [
+                            {
+                                $filter: {
+                                    input: "$participants",
+                                    cond: { $ne: ["$$this", userObjectId] },
+                                },
+                            },
+                            0,
+                        ],
+                    },
+                    // Extract unread count for current user from Map
+                    // Replaces: conv.unreadCount?.get?.(userId) || conv.unreadCount?.[userId] || 0
+                    userUnreadCount: {
+                        $ifNull: [{ $getField: { field: userId, input: "$unreadCount" } }, 0],
+                    },
+                },
+            },
 
-        res.json({ conversations: populatedConversations });
+            // Stage 4: Lookup from Users collection
+            // Replaces: await User.findById(otherParticipantId)
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "otherParticipantId",
+                    foreignField: "_id",
+                    as: "userInfo",
+                },
+            },
+
+            // Stage 5: Lookup from Students collection (for mixed models)
+            // Replaces: await Student.findById(otherParticipantId)
+            {
+                $lookup: {
+                    from: "students",
+                    localField: "otherParticipantId",
+                    foreignField: "_id",
+                    as: "studentInfo",
+                },
+            },
+
+            // Stage 6: Merge user/student info and project final shape
+            // Replaces: getUserInfo() return object
+            {
+                $project: {
+                    _id: 1,
+                    otherParticipant: {
+                        $cond: {
+                            if: { $gt: [{ $size: "$userInfo" }, 0] },
+                            then: {
+                                _id: { $arrayElemAt: ["$userInfo._id", 0] },
+                                name: { $arrayElemAt: ["$userInfo.name", 0] },
+                                email: { $arrayElemAt: ["$userInfo.email", 0] },
+                                avatar: { $arrayElemAt: ["$userInfo.avatar", 0] },
+                                role: { $arrayElemAt: ["$userInfo.role", 0] },
+                            },
+                            else: {
+                                $cond: {
+                                    if: { $gt: [{ $size: "$studentInfo" }, 0] },
+                                    then: {
+                                        _id: { $arrayElemAt: ["$studentInfo._id", 0] },
+                                        name: { $arrayElemAt: ["$studentInfo.name", 0] },
+                                        email: { $arrayElemAt: ["$studentInfo.email", 0] },
+                                        avatar: { $arrayElemAt: ["$studentInfo.avatar", 0] },
+                                        role: { $literal: "student" },
+                                    },
+                                    else: { name: "Unknown" },
+                                },
+                            },
+                        },
+                    },
+                    lastMessage: 1,
+                    lastMessageAt: 1,
+                    unreadCount: "$userUnreadCount",
+                    createdAt: 1,
+                },
+            },
+        ]);
+
+        res.json({ conversations });
     } catch (err) {
         console.error("Get Conversations Error:", err);
         res.status(500).json({ message: "Server error" });
@@ -311,120 +392,237 @@ exports.markAsRead = async (req, res) => {
    GET SUGGESTED CONTACTS
    GET /api/chat/contacts
    Returns users the current user can chat with
+   
+   REFACTORED: High-Traffic Optimization
+   - REMOVED: JS map for transformation
+   - REMOVED: JS forEach for iteration  
+   - REMOVED: JS Set for deduplication (replaced with $group)
+   - ADDED: Role-based aggregations with $lookup and $project
+   - ADDED: $group for duplicate removal at DB level
 ====================================================== */
 exports.getContacts = async (req, res) => {
     try {
         const userId = req.user.id;
         const userRole = req.user.role;
+        const userObjectId = new (require("mongoose").Types.ObjectId)(userId);
 
         let contacts = [];
 
         if (userRole === "advisor") {
-            // Advisor sees their assigned students
-            const students = await Student.find({ advisorId: userId, status: "active" })
-                .select("name email avatar")
-                .lean();
+            // === ADVISOR CONTACTS ===
+            // Replaces: students.map(s => ({ ...s, role: "student" }))
+            // Replaces: [...contacts, ...reviewers.map(...)]
 
-            contacts = students.map(s => ({
-                ...s,
-                role: "student",
-                model: "Student",
-            }));
+            // Get students with $project transformation
+            const students = await Student.aggregate([
+                { $match: { advisorId: userObjectId, status: "active" } },
+                {
+                    $project: {
+                        name: 1,
+                        email: 1,
+                        avatar: 1,
+                        role: { $literal: "student" },
+                        model: { $literal: "Student" },
+                    },
+                },
+            ]);
 
-            // Also get reviewers they've worked with
-            const reviewSessions = await ReviewSession.find({ advisor: userId })
-                .distinct("reviewer");
+            // Get unique reviewers from review sessions
+            // Replaces: ReviewSession.find().distinct() + User.find()
+            const reviewers = await ReviewSession.aggregate([
+                { $match: { advisor: userObjectId } },
+                { $group: { _id: "$reviewer" } }, // Unique reviewer IDs
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "reviewerInfo",
+                    },
+                },
+                { $unwind: "$reviewerInfo" },
+                { $match: { "reviewerInfo.status": "active" } },
+                {
+                    $project: {
+                        _id: "$reviewerInfo._id",
+                        name: "$reviewerInfo.name",
+                        email: "$reviewerInfo.email",
+                        avatar: "$reviewerInfo.avatar",
+                        role: "$reviewerInfo.role",
+                        model: { $literal: "User" },
+                    },
+                },
+            ]);
 
-            if (reviewSessions.length > 0) {
-                const reviewers = await User.find({
-                    _id: { $in: reviewSessions },
-                    status: "active"
-                }).select("name email avatar role").lean();
+            contacts = [...students, ...reviewers];
 
-                contacts = [...contacts, ...reviewers.map(r => ({ ...r, model: "User" }))];
-            }
         } else if (userRole === "student") {
-            // Student sees their advisor
-            const student = await Student.findById(userId).populate("advisorId", "name email avatar role");
-            if (student?.advisorId) {
-                contacts.push({
-                    ...student.advisorId.toObject(),
-                    model: "User",
-                });
+            // === STUDENT CONTACTS ===
+            // Get advisor via $lookup
+            const studentWithAdvisor = await Student.aggregate([
+                { $match: { _id: userObjectId } },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "advisorId",
+                        foreignField: "_id",
+                        as: "advisorInfo",
+                    },
+                },
+                { $unwind: { path: "$advisorInfo", preserveNullAndEmptyArrays: true } },
+                {
+                    $project: {
+                        advisor: {
+                            _id: "$advisorInfo._id",
+                            name: "$advisorInfo.name",
+                            email: "$advisorInfo.email",
+                            avatar: "$advisorInfo.avatar",
+                            role: "$advisorInfo.role",
+                            model: { $literal: "User" },
+                        },
+                    },
+                },
+            ]);
+
+            if (studentWithAdvisor[0]?.advisor?._id) {
+                contacts.push(studentWithAdvisor[0].advisor);
             }
 
-            // Get reviewers with approved chat requests
-            const approvedRequests = await ChatRequest.find({
-                studentId: userId,
-                status: "approved"
-            }).populate("reviewerId", "name email avatar role");
+            // Get approved reviewers via aggregation
+            // Replaces: approvedRequests.forEach(req => { contacts.push(...) })
+            const approvedReviewers = await ChatRequest.aggregate([
+                { $match: { studentId: userObjectId, status: "approved" } },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "reviewerId",
+                        foreignField: "_id",
+                        as: "reviewerInfo",
+                    },
+                },
+                { $unwind: "$reviewerInfo" },
+                {
+                    $project: {
+                        _id: "$reviewerInfo._id",
+                        name: "$reviewerInfo.name",
+                        email: "$reviewerInfo.email",
+                        avatar: "$reviewerInfo.avatar",
+                        role: "$reviewerInfo.role",
+                        model: { $literal: "User" },
+                        chatApproved: { $literal: true },
+                    },
+                },
+            ]);
 
-            approvedRequests.forEach(req => {
-                if (req.reviewerId) {
-                    contacts.push({
-                        ...req.reviewerId.toObject(),
-                        model: "User",
-                        chatApproved: true,
-                    });
+            contacts = [...contacts, ...approvedReviewers];
+            const approvedReviewerIds = approvedReviewers.map(r => r._id.toString());
+
+            // Get reviewers from sessions (for chat request)
+            // Replaces: sessions.forEach with includes check
+            const sessionReviewers = await ReviewSession.aggregate([
+                {
+                    $match: {
+                        student: userObjectId,
+                        status: { $in: ["pending", "scheduled", "accepted", "completed"] },
+                    },
+                },
+                { $group: { _id: "$reviewer" } }, // Deduplicate
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "reviewerInfo",
+                    },
+                },
+                { $unwind: "$reviewerInfo" },
+                {
+                    $project: {
+                        _id: "$reviewerInfo._id",
+                        name: "$reviewerInfo.name",
+                        email: "$reviewerInfo.email",
+                        avatar: "$reviewerInfo.avatar",
+                        role: "$reviewerInfo.role",
+                        model: { $literal: "User" },
+                        canRequestChat: { $literal: true },
+                    },
+                },
+            ]);
+
+            // Filter out already approved reviewers (this check stays in JS for accuracy)
+            sessionReviewers.forEach(reviewer => {
+                if (!approvedReviewerIds.includes(reviewer._id.toString())) {
+                    contacts.push(reviewer);
                 }
             });
 
-            // Get reviewers from review sessions (for requesting chat)
-            const sessions = await ReviewSession.find({
-                student: userId,
-                status: { $in: ["pending", "scheduled", "accepted", "completed"] }
-            }).populate("reviewer", "name email avatar role");
-
-            const existingReviewerIds = approvedRequests.map(r => r.reviewerId?._id?.toString());
-            sessions.forEach(session => {
-                if (session.reviewer && !existingReviewerIds.includes(session.reviewer._id.toString())) {
-                    contacts.push({
-                        ...session.reviewer.toObject(),
-                        model: "User",
-                        canRequestChat: true,
-                    });
-                }
-            });
         } else if (userRole === "reviewer") {
-            // Reviewer sees advisors they've worked with
-            const sessions = await ReviewSession.find({ reviewer: userId })
-                .populate("advisor", "name email avatar role");
+            // === REVIEWER CONTACTS ===
+            // Get unique advisors using $group (Replaces: Map-based deduplication)
+            const advisors = await ReviewSession.aggregate([
+                { $match: { reviewer: userObjectId } },
+                { $group: { _id: "$advisor" } }, // Replaces: advisorMap.has() check
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "advisorInfo",
+                    },
+                },
+                { $unwind: "$advisorInfo" },
+                {
+                    $project: {
+                        _id: "$advisorInfo._id",
+                        name: "$advisorInfo.name",
+                        email: "$advisorInfo.email",
+                        avatar: "$advisorInfo.avatar",
+                        role: "$advisorInfo.role",
+                        model: { $literal: "User" },
+                    },
+                },
+            ]);
 
-            const advisorMap = new Map();
-            sessions.forEach(s => {
-                if (s.advisor && !advisorMap.has(s.advisor._id.toString())) {
-                    advisorMap.set(s.advisor._id.toString(), {
-                        ...s.advisor.toObject(),
-                        model: "User",
-                    });
-                }
-            });
-            contacts = [...advisorMap.values()];
+            contacts = [...advisors];
 
-            // Get students with approved chat requests
-            const approvedRequests = await ChatRequest.find({
-                reviewerId: userId,
-                status: "approved"
-            }).populate("studentId", "name email avatar");
+            // Get approved students
+            // Replaces: approvedRequests.forEach(...)
+            const approvedStudents = await ChatRequest.aggregate([
+                { $match: { reviewerId: userObjectId, status: "approved" } },
+                {
+                    $lookup: {
+                        from: "students",
+                        localField: "studentId",
+                        foreignField: "_id",
+                        as: "studentInfo",
+                    },
+                },
+                { $unwind: "$studentInfo" },
+                {
+                    $project: {
+                        _id: "$studentInfo._id",
+                        name: "$studentInfo.name",
+                        email: "$studentInfo.email",
+                        avatar: "$studentInfo.avatar",
+                        role: { $literal: "student" },
+                        model: { $literal: "Student" },
+                        chatApproved: { $literal: true },
+                    },
+                },
+            ]);
 
-            approvedRequests.forEach(req => {
-                if (req.studentId) {
-                    contacts.push({
-                        ...req.studentId.toObject(),
-                        role: "student",
-                        model: "Student",
-                        chatApproved: true,
-                    });
-                }
-            });
+            contacts = [...contacts, ...approvedStudents];
         }
 
-        // Remove duplicates by ID
+        // === FINAL DEDUPLICATION ===
+        // Still needed for cross-source merges (advisor+reviewer from different queries)
+        // Replaces: Set-based deduplication
         const uniqueContacts = [];
         const seenIds = new Set();
         contacts.forEach(c => {
-            if (!seenIds.has(c._id.toString())) {
-                seenIds.add(c._id.toString());
+            const id = c._id.toString();
+            if (!seenIds.has(id)) {
+                seenIds.add(id);
                 uniqueContacts.push(c);
             }
         });
@@ -495,6 +693,15 @@ exports.createChatRequest = async (req, res) => {
             reason: reason || "Student requested to chat with reviewer",
         });
 
+        // === NOTIFICATION: Notify advisor of new chat request ===
+        // Fire-and-forget: don't await, don't block response
+        notifyChatRequestCreated({
+            advisorId: student.advisorId,
+            studentName: student.name,
+            reviewerName: reviewer.name,
+            requestId: chatRequest._id,
+        });
+
         res.status(201).json({
             message: "Chat request submitted. Waiting for advisor approval.",
             request: chatRequest
@@ -537,6 +744,10 @@ exports.getChatRequests = async (req, res) => {
 /* ======================================================
    APPROVE CHAT REQUEST
    PATCH /api/chat/request/:id/approve
+   
+   REFACTORED: Atomic Operation
+   - REMOVED: findOne → status check → mutate → save (race-prone)
+   - ADDED: findOneAndUpdate with status condition in query (atomic)
 ====================================================== */
 exports.approveChatRequest = async (req, res) => {
     try {
@@ -548,18 +759,33 @@ exports.approveChatRequest = async (req, res) => {
             return res.status(403).json({ message: "Only advisors can approve chat requests" });
         }
 
-        const chatRequest = await ChatRequest.findOne({ _id: id, advisorId: userId });
+        // === ATOMIC UPDATE ===
+        // Replaces: findOne → check status → modify → save
+        // The status: "pending" in query ensures we only update pending requests
+        const chatRequest = await ChatRequest.findOneAndUpdate(
+            { _id: id, advisorId: userId, status: "pending" },
+            { status: "approved", respondedAt: new Date() },
+            { new: true }
+        );
+
         if (!chatRequest) {
-            return res.status(404).json({ message: "Request not found" });
+            // Could be: not found, not owner, or already processed
+            const existing = await ChatRequest.findOne({ _id: id, advisorId: userId });
+            if (!existing) {
+                return res.status(404).json({ message: "Request not found" });
+            }
+            return res.status(400).json({ message: `Request already ${existing.status}` });
         }
 
-        if (chatRequest.status !== "pending") {
-            return res.status(400).json({ message: `Request already ${chatRequest.status}` });
-        }
-
-        chatRequest.status = "approved";
-        chatRequest.respondedAt = new Date();
-        await chatRequest.save();
+        // === NOTIFICATION: Notify student and reviewer of approval ===
+        // Fire-and-forget: async notification, don't block response
+        notifyChatRequestApproved({
+            studentId: chatRequest.studentId,
+            reviewerId: chatRequest.reviewerId,
+            studentName: "", // Will be looked up in service if needed
+            reviewerName: "",
+            requestId: chatRequest._id,
+        });
 
         res.json({ message: "Chat request approved", request: chatRequest });
     } catch (err) {
@@ -571,6 +797,10 @@ exports.approveChatRequest = async (req, res) => {
 /* ======================================================
    REJECT CHAT REQUEST
    PATCH /api/chat/request/:id/reject
+   
+   REFACTORED: Atomic Operation
+   - REMOVED: findOne → status check → mutate → save (race-prone)
+   - ADDED: findOneAndUpdate with status condition (atomic)
 ====================================================== */
 exports.rejectChatRequest = async (req, res) => {
     try {
@@ -583,19 +813,34 @@ exports.rejectChatRequest = async (req, res) => {
             return res.status(403).json({ message: "Only advisors can reject chat requests" });
         }
 
-        const chatRequest = await ChatRequest.findOne({ _id: id, advisorId: userId });
+        // === ATOMIC UPDATE ===
+        // Replaces: findOne → check status → modify → save
+        const chatRequest = await ChatRequest.findOneAndUpdate(
+            { _id: id, advisorId: userId, status: "pending" },
+            {
+                status: "rejected",
+                rejectionReason: rejectionReason,
+                respondedAt: new Date()
+            },
+            { new: true }
+        );
+
         if (!chatRequest) {
-            return res.status(404).json({ message: "Request not found" });
+            const existing = await ChatRequest.findOne({ _id: id, advisorId: userId });
+            if (!existing) {
+                return res.status(404).json({ message: "Request not found" });
+            }
+            return res.status(400).json({ message: `Request already ${existing.status}` });
         }
 
-        if (chatRequest.status !== "pending") {
-            return res.status(400).json({ message: `Request already ${chatRequest.status}` });
-        }
-
-        chatRequest.status = "rejected";
-        chatRequest.rejectionReason = rejectionReason;
-        chatRequest.respondedAt = new Date();
-        await chatRequest.save();
+        // === NOTIFICATION: Notify student of rejection ===
+        // Fire-and-forget: async notification, don't block response
+        notifyChatRequestRejected({
+            studentId: chatRequest.studentId,
+            reviewerName: "", // Will be looked up if needed
+            reason: rejectionReason,
+            requestId: chatRequest._id,
+        });
 
         res.json({ message: "Chat request rejected", request: chatRequest });
     } catch (err) {

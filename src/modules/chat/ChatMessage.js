@@ -58,6 +58,10 @@ chatMessageSchema.index({ conversationId: 1, createdAt: -1 });
 chatMessageSchema.index({ reviewSessionId: 1, createdAt: -1 });
 chatMessageSchema.index({ senderId: 1, createdAt: -1 });
 
+// === PHASE 2: Performance Index for markAsRead ===
+// Supports: updateMany({ conversationId, senderId: { $ne }, isRead: false })
+chatMessageSchema.index({ conversationId: 1, senderId: 1, isRead: 1 });
+
 /**
  * Get messages for a conversation (paginated)
  */

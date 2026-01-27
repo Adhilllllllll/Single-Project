@@ -71,6 +71,23 @@ const notificationSchema = new mongoose.Schema(
             taskId: mongoose.Schema.Types.ObjectId,
             senderId: mongoose.Schema.Types.ObjectId,
         },
+
+        // === PHASE 2: Entity Reference Fields ===
+        // Enables: deep linking, grouping, deduplication, analytics
+        // Non-breaking: existing notifications remain valid
+        entityType: {
+            type: String,
+            enum: ["chat", "issue", "review", "user", "system"],
+        },
+        entityId: {
+            type: mongoose.Schema.Types.ObjectId,
+        },
+        priority: {
+            type: String,
+            enum: ["low", "normal", "high"],
+            default: "normal",
+        },
+
         // Delivery status for admin tracking
         deliveryStatus: {
             type: String,
@@ -86,6 +103,21 @@ notificationSchema.index({ recipient: 1, isRead: 1 });
 notificationSchema.index({ recipient: 1, createdAt: -1 });
 notificationSchema.index({ senderId: 1, createdAt: -1 }); // For admin sent notifications
 notificationSchema.index({ isBroadcast: 1, recipientGroup: 1 }); // For broadcast queries
+
+// === PHASE 2: Entity Lookup Index ===
+// Supports: grouping by entity, deduplication, deep linking
+notificationSchema.index({ entityType: 1, entityId: 1 });
+
+// === PHASE 3: Deduplication Compound Index ===
+// Supports: time-window dedup queries in createNotification()
+// Query: { recipient, entityType, entityId, type, createdAt: { $gte } }
+notificationSchema.index({
+    recipient: 1,
+    entityType: 1,
+    entityId: 1,
+    type: 1,
+    createdAt: -1
+});
 
 module.exports = mongoose.model("Notification", notificationSchema);
 

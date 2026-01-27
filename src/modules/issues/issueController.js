@@ -2,6 +2,13 @@ const Issue = require("./Issue");
 const Student = require("../students/student");
 const User = require("../users/User");
 
+// === NOTIFICATION SERVICE ===
+// Fire-and-forget notification triggers for issue events
+const {
+    notifyIssueCreated,
+    notifyIssueStatusUpdated,
+} = require("../notifications/notification.service");
+
 /* ======================================================
    SUBMIT NEW ISSUE (Student)
    POST /api/issues
@@ -62,6 +69,28 @@ exports.createIssue = async (req, res) => {
                     });
                 });
             }
+        }
+
+        // === NOTIFICATION: Create persistent notifications for recipients ===
+        // Fire-and-forget: complements Socket.IO real-time delivery with DB persistence
+        const recipientUserIds = [];
+        if (recipients.includes("advisor")) {
+            recipientUserIds.push(student.advisorId);
+        }
+        if (recipients.includes("admin")) {
+            // Admins already fetched above for Socket.IO
+            const admins = await User.find({ role: "admin", status: "active" }).select("_id").lean();
+            recipientUserIds.push(...admins.map(a => a._id));
+        }
+
+        if (recipientUserIds.length > 0) {
+            notifyIssueCreated({
+                recipientIds: recipientUserIds,
+                issueId: issue._id,
+                subject,
+                studentName: student.name,
+                category: category || "other",
+            });
         }
 
         res.status(201).json({
@@ -278,6 +307,18 @@ exports.updateIssueStatus = async (req, res) => {
             });
         }
 
+        // === NOTIFICATION: Create persistent notification for student ===
+        // Fire-and-forget: complements Socket.IO with DB persistence
+        // Get responder name for notification message
+        const responder = await User.findById(userId).select("name").lean();
+        notifyIssueStatusUpdated({
+            studentId: issue.studentId,
+            issueId: issue._id,
+            subject: issue.subject,
+            newStatus: status,
+            responderName: responder?.name || "Staff",
+        });
+
         res.json({ message: `Issue marked as ${status}`, issue });
     } catch (err) {
         console.error("Update Issue Status Error:", err);
@@ -288,6 +329,11 @@ exports.updateIssueStatus = async (req, res) => {
 /* ======================================================
    GET ISSUE COUNTS (For badges)
    GET /api/issues/counts
+   
+   REFACTORED: Consolidated 3 countDocuments → 1 aggregation
+   - REMOVED: 3 separate countDocuments calls (3 DB round trips)
+   - ADDED: Single aggregation with $group + $cond (1 DB call)
+   - Response structure unchanged: { pending, inProgress, resolved, total }
 ====================================================== */
 exports.getIssueCounts = async (req, res) => {
     try {
@@ -297,18 +343,47 @@ exports.getIssueCounts = async (req, res) => {
         let query = {};
 
         if (userRole === "advisor") {
-            query = { advisorId: userId, recipients: "advisor" };
+            query = { advisorId: new (require("mongoose").Types.ObjectId)(userId), recipients: "advisor" };
         } else if (userRole === "admin") {
             query = { recipients: "admin" };
         } else if (userRole === "student") {
-            query = { studentId: userId };
+            query = { studentId: new (require("mongoose").Types.ObjectId)(userId) };
         }
 
-        const pending = await Issue.countDocuments({ ...query, status: "pending" });
-        const inProgress = await Issue.countDocuments({ ...query, status: "in-progress" });
-        const resolved = await Issue.countDocuments({ ...query, status: "resolved" });
+        // === SINGLE AGGREGATION - REPLACES 3 countDocuments ===
+        // Previously:
+        //   const pending = await Issue.countDocuments({ ...query, status: "pending" });
+        //   const inProgress = await Issue.countDocuments({ ...query, status: "in-progress" });
+        //   const resolved = await Issue.countDocuments({ ...query, status: "resolved" });
+        // Now: One aggregation with conditional counting
+        const result = await Issue.aggregate([
+            { $match: query },
+            {
+                $group: {
+                    _id: null,
+                    pending: {
+                        $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] },
+                    },
+                    inProgress: {
+                        $sum: { $cond: [{ $eq: ["$status", "in-progress"] }, 1, 0] },
+                    },
+                    resolved: {
+                        $sum: { $cond: [{ $eq: ["$status", "resolved"] }, 1, 0] },
+                    },
+                    total: { $sum: 1 },
+                },
+            },
+        ]);
 
-        res.json({ pending, inProgress, resolved, total: pending + inProgress + resolved });
+        // Handle empty result (no issues match query)
+        const counts = result[0] || { pending: 0, inProgress: 0, resolved: 0, total: 0 };
+
+        res.json({
+            pending: counts.pending,
+            inProgress: counts.inProgress,
+            resolved: counts.resolved,
+            total: counts.total,
+        });
     } catch (err) {
         console.error("Get Issue Counts Error:", err);
         res.status(500).json({ message: "Server error" });

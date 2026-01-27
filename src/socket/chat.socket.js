@@ -4,6 +4,10 @@ const ChatRequest = require("../modules/chat/ChatRequest");
 const User = require("../modules/users/User");
 const Student = require("../modules/students/student");
 
+// === NOTIFICATION SERVICE ===
+// Fire-and-forget notification trigger for new chat messages
+const { notifyChatMessage } = require("../modules/notifications/notification.service");
+
 /**
  * Normal Chat Socket Handler
  * Rules:
@@ -174,6 +178,17 @@ const chatSocketHandler = (io, socket, onlineUsers) => {
             io.to(`user:${otherParticipantId}`).emit("chat:newMessage", {
                 conversationId,
                 message: messageData,
+            });
+
+            // === NOTIFICATION: Create persistent notification for recipient ===
+            // Fire-and-forget: creates DB record + emits if online
+            // This ensures notification persists even if recipient is offline
+            notifyChatMessage({
+                recipientId: otherParticipantId.toString(),
+                recipientModel: conversation.participantModels?.[1] || "User",
+                conversationId,
+                senderName: userName,
+                messagePreview: content.trim(),
             });
 
             console.log(`📨 Message sent in chat:${conversationId} by ${userName}`);
