@@ -88,7 +88,8 @@ reviewerEvaluationSchema.pre("save", function (next) {
 });
 
 // Indexes for efficient queries
-reviewerEvaluationSchema.index({ reviewSession: 1 });
+// NOTE: reviewSession index NOT needed - `unique: true` on field already creates one
+// reviewerEvaluationSchema.index({ reviewSession: 1 }); // REMOVED: Duplicate
 reviewerEvaluationSchema.index({ reviewer: 1 });
 reviewerEvaluationSchema.index({ createdAt: -1 });
 

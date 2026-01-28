@@ -197,12 +197,49 @@ const studentSchema = new mongoose.Schema(
         uploadedAt: { type: Date, default: Date.now },
       },
     ],
+
+    // === FCM Push Notification Tokens ===
+    // Supports multiple devices per user
+    fcmTokens: [{
+      token: {
+        type: String,
+        required: true,
+      },
+      platform: {
+        type: String,
+        enum: ["web", "android", "ios"],
+        default: "web",
+      },
+      lastUsedAt: {
+        type: Date,
+        default: Date.now,
+      },
+      userAgent: {
+        type: String,
+      },
+    }],
+
+    // === Notification Preferences ===
+    // Controls push notification delivery (socket always works)
+    notificationPreferences: {
+      // Global push notification toggle
+      pushEnabled: {
+        type: Boolean,
+        default: true,
+      },
+      // Muted conversations - no push for these chats
+      mutedChats: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Conversation",
+      }],
+    },
   },
   { timestamps: true }
 );
 
 /* -------- INDEXES -------- */
-studentSchema.index({ email: 1 });    // Also enforced by unique: true
+// NOTE: email index NOT needed here - `unique: true` on field already creates one
+// studentSchema.index({ email: 1 });   // REMOVED: Duplicate (Mongoose warning fix)
 studentSchema.index({ advisorId: 1 });
 studentSchema.index({ status: 1 });
 

@@ -4,6 +4,8 @@ const authMiddleware = require("../../middlewares/authMiddleware");
 
 // Allow all user roles to access notifications
 const anyUserAuth = authMiddleware(["student", "advisor", "reviewer", "admin"]);
+// Admin-only access for test endpoints
+const adminAuth = authMiddleware(["admin"]);
 
 /* =======================
    GET NOTIFICATIONS
@@ -77,6 +79,57 @@ router.delete(
     notificationController.cleanupOldNotifications
 );
 
+/* =======================
+   FCM TOKEN REGISTRATION
+   Push Notification Token Management
+======================= */
+router.post(
+    "/register-token",
+    anyUserAuth,
+    notificationController.registerFcmToken
+);
+
+router.delete(
+    "/remove-token",
+    anyUserAuth,
+    notificationController.removeFcmToken
+);
+
+/* =======================
+   NOTIFICATION PREFERENCES
+======================= */
+router.get(
+    "/preferences",
+    anyUserAuth,
+    notificationController.getNotificationPreferences
+);
+
+router.patch(
+    "/preferences",
+    anyUserAuth,
+    notificationController.updateNotificationPreferences
+);
+
+router.patch(
+    "/mute-chat/:chatId",
+    anyUserAuth,
+    notificationController.muteChat
+);
+
+router.patch(
+    "/unmute-chat/:chatId",
+    anyUserAuth,
+    notificationController.unmuteChat
+);
+
+/* =======================
+   TEST PUSH (Admin Only)
+   For verifying FCM configuration
+======================= */
+router.post(
+    "/test-push",
+    adminAuth,
+    notificationController.testPushNotification
+);
+
 module.exports = router;
-
-

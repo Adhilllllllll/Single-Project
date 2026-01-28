@@ -154,7 +154,23 @@ const sendNotification = async (recipientId, notificationData, saveToDb = true) 
 
             console.log(`🔔 Notification sent to online user: ${recipientId}`);
         } else {
-            console.log(`📬 Notification stored for offline user: ${recipientId}`);
+            // === PUSH NOTIFICATION FALLBACK ===
+            // User is offline - send FCM push notification
+            // This is the ONLY place where push is sent (never alongside socket)
+            try {
+                const { sendPushToUser } = require("../services/pushNotification.service");
+                const pushResult = await sendPushToUser(recipientId, notificationData);
+
+                if (pushResult.success) {
+                    console.log(`📲 Push notification sent to offline user: ${recipientId} (${pushResult.sent} devices)`);
+                } else {
+                    console.log(`📬 Notification stored for offline user: ${recipientId} (no FCM tokens)`);
+                }
+            } catch (pushError) {
+                // Don't fail the whole notification just because push failed
+                console.error(`Push notification error for ${recipientId}:`, pushError.message);
+                console.log(`📬 Notification stored in DB for offline user: ${recipientId}`);
+            }
         }
 
         return notification;
