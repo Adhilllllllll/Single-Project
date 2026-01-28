@@ -107,6 +107,31 @@ reviewerAvailabilitySchema.index(
 // Index for faster queries by reviewer
 reviewerAvailabilitySchema.index({ reviewerId: 1, availabilityType: 1 });
 
+// ============================================================
+// PHASE 2: PERFORMANCE INDEXES FOR AGGREGATION PIPELINES
+// ============================================================
+
+// Index 1: For getAvailabilityByDate - recurring slots query
+// Supports: $match on availabilityType + dayOfWeek + slotType, then $sort by startTime
+reviewerAvailabilitySchema.index(
+  { availabilityType: 1, dayOfWeek: 1, slotType: 1, startTime: 1 },
+  { name: "availability_by_date_recurring" }
+);
+
+// Index 2: For getAvailabilityByDate - specific date slots query
+// Supports: $match on availabilityType + specificDate range + slotType
+reviewerAvailabilitySchema.index(
+  { availabilityType: 1, specificDate: 1, slotType: 1, startTime: 1 },
+  { name: "availability_by_date_specific" }
+);
+
+// Index 3: For reviewer-filtered queries (getAllAvailability, getMyAvailability)
+// Supports: $match on reviewerId + slotType, then $sort by dayOfWeek + startTime
+reviewerAvailabilitySchema.index(
+  { reviewerId: 1, slotType: 1, dayOfWeek: 1, startTime: 1 },
+  { name: "reviewer_slots_query" }
+);
+
 module.exports = mongoose.model(
   "ReviewerAvailability",
   reviewerAvailabilitySchema

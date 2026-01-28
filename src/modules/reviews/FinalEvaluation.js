@@ -85,7 +85,8 @@ const finalEvaluationSchema = new mongoose.Schema(
 );
 
 // Indexes for efficient queries
-finalEvaluationSchema.index({ reviewSession: 1 });
+// NOTE: reviewSession index NOT needed - `unique: true` on field already creates one
+// finalEvaluationSchema.index({ reviewSession: 1 }); // REMOVED: Duplicate
 finalEvaluationSchema.index({ advisor: 1 });
 finalEvaluationSchema.index({ createdAt: -1 });
 

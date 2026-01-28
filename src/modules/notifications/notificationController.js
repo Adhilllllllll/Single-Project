@@ -439,3 +439,396 @@ exports.cleanupOldNotifications = async (req, res) => {
         res.status(500).json({ message: "Failed to cleanup notifications" });
     }
 };
+
+/* ======================================================
+   FCM TOKEN REGISTRATION
+   POST /api/notifications/register-token
+   
+   Registers a Firebase Cloud Messaging token for push notifications.
+   - Prevents duplicate tokens
+   - Updates lastUsedAt for existing tokens
+   - Supports multiple devices per user
+====================================================== */
+exports.registerFcmToken = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userModel = req.user.role === "student" ? "Student" : "User";
+        const { token, platform = "web" } = req.body;
+
+        // Validate token
+        if (!token || typeof token !== "string" || token.length < 20) {
+            return res.status(400).json({
+                message: "Valid FCM token is required",
+            });
+        }
+
+        // Get the correct model
+        const Model = userModel === "Student" ? Student : User;
+
+        // Check if token already exists for this user
+        const user = await Model.findById(userId).select("fcmTokens");
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const existingTokenIndex = user.fcmTokens?.findIndex(
+            (t) => t.token === token
+        );
+
+        if (existingTokenIndex !== -1) {
+            // Token exists - update lastUsedAt
+            await Model.findOneAndUpdate(
+                { _id: userId, "fcmTokens.token": token },
+                {
+                    $set: {
+                        "fcmTokens.$.lastUsedAt": new Date(),
+                        "fcmTokens.$.userAgent": req.headers["user-agent"] || null,
+                    }
+                }
+            );
+
+            return res.status(200).json({
+                message: "Token already registered, updated lastUsedAt",
+                isNew: false,
+            });
+        }
+
+        // Check if this token exists for another user (should be rare)
+        // If so, remove it from the other user first
+        await Model.updateMany(
+            { "fcmTokens.token": token, _id: { $ne: userId } },
+            { $pull: { fcmTokens: { token } } }
+        );
+
+        // Also check the other model
+        const OtherModel = userModel === "Student" ? User : Student;
+        await OtherModel.updateMany(
+            { "fcmTokens.token": token },
+            { $pull: { fcmTokens: { token } } }
+        );
+
+        // Add new token
+        await Model.findByIdAndUpdate(userId, {
+            $push: {
+                fcmTokens: {
+                    token,
+                    platform,
+                    lastUsedAt: new Date(),
+                    userAgent: req.headers["user-agent"] || null,
+                },
+            },
+        });
+
+        console.log(`🔔 FCM token registered for ${userModel}:${userId} (${platform})`);
+
+        res.status(201).json({
+            message: "FCM token registered successfully",
+            isNew: true,
+            platform,
+        });
+    } catch (err) {
+        console.error("REGISTER FCM TOKEN ERROR:", err);
+        res.status(500).json({ message: "Failed to register FCM token" });
+    }
+};
+
+/* ======================================================
+   FCM TOKEN REMOVAL
+   DELETE /api/notifications/remove-token
+   
+   Removes a Firebase Cloud Messaging token (e.g., on logout).
+   - Removes from current user only
+   - Safe to call even if token doesn't exist
+====================================================== */
+exports.removeFcmToken = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userModel = req.user.role === "student" ? "Student" : "User";
+        const { token } = req.body;
+
+        // Validate token
+        if (!token) {
+            return res.status(400).json({
+                message: "FCM token is required",
+            });
+        }
+
+        // Get the correct model
+        const Model = userModel === "Student" ? Student : User;
+
+        // Remove the token
+        const result = await Model.findByIdAndUpdate(
+            userId,
+            { $pull: { fcmTokens: { token } } },
+            { new: true }
+        );
+
+        if (!result) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        console.log(`🔕 FCM token removed for ${userModel}:${userId}`);
+
+        res.status(200).json({
+            message: "FCM token removed successfully",
+        });
+    } catch (err) {
+        console.error("REMOVE FCM TOKEN ERROR:", err);
+        res.status(500).json({ message: "Failed to remove FCM token" });
+    }
+};
+
+/* ======================================================
+   GET NOTIFICATION PREFERENCES
+   GET /api/notifications/preferences
+====================================================== */
+exports.getNotificationPreferences = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userModel = req.user.role === "student" ? "Student" : "User";
+        const Model = userModel === "Student" ? Student : User;
+
+        const user = await Model.findById(userId)
+            .select("notificationPreferences")
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Return defaults if preferences don't exist yet
+        const preferences = user.notificationPreferences || {
+            pushEnabled: true,
+            mutedChats: [],
+        };
+
+        res.status(200).json({
+            preferences,
+        });
+    } catch (err) {
+        console.error("GET PREFERENCES ERROR:", err);
+        res.status(500).json({ message: "Failed to get preferences" });
+    }
+};
+
+/* ======================================================
+   UPDATE NOTIFICATION PREFERENCES
+   PATCH /api/notifications/preferences
+   
+   Body: { pushEnabled: boolean }
+====================================================== */
+exports.updateNotificationPreferences = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userModel = req.user.role === "student" ? "Student" : "User";
+        const { pushEnabled } = req.body;
+
+        // Validate input
+        if (typeof pushEnabled !== "boolean") {
+            return res.status(400).json({
+                message: "pushEnabled must be a boolean",
+            });
+        }
+
+        const Model = userModel === "Student" ? Student : User;
+
+        const user = await Model.findByIdAndUpdate(
+            userId,
+            { $set: { "notificationPreferences.pushEnabled": pushEnabled } },
+            { new: true }
+        ).select("notificationPreferences");
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        console.log(`🔔 Push ${pushEnabled ? "enabled" : "disabled"} for ${userModel}:${userId}`);
+
+        res.status(200).json({
+            message: `Push notifications ${pushEnabled ? "enabled" : "disabled"}`,
+            preferences: user.notificationPreferences,
+        });
+    } catch (err) {
+        console.error("UPDATE PREFERENCES ERROR:", err);
+        res.status(500).json({ message: "Failed to update preferences" });
+    }
+};
+
+/* ======================================================
+   MUTE CHAT
+   PATCH /api/notifications/mute-chat/:chatId
+   
+   Mutes push notifications for a specific conversation.
+   Socket notifications still work.
+====================================================== */
+const Conversation = require("../chat/Conversation");
+
+exports.muteChat = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userModel = req.user.role === "student" ? "Student" : "User";
+        const { chatId } = req.params;
+
+        // Validate chatId
+        if (!mongoose.Types.ObjectId.isValid(chatId)) {
+            return res.status(400).json({ message: "Invalid chat ID" });
+        }
+
+        // Verify user is participant in this conversation
+        const conversation = await Conversation.findById(chatId);
+        if (!conversation) {
+            return res.status(404).json({ message: "Conversation not found" });
+        }
+
+        const isParticipant = conversation.participants.some(
+            (p) => p.toString() === userId
+        );
+        if (!isParticipant) {
+            return res.status(403).json({
+                message: "You are not a participant in this conversation",
+            });
+        }
+
+        const Model = userModel === "Student" ? Student : User;
+
+        // Add to mutedChats if not already muted
+        const user = await Model.findByIdAndUpdate(
+            userId,
+            { $addToSet: { "notificationPreferences.mutedChats": chatId } },
+            { new: true }
+        ).select("notificationPreferences");
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        console.log(`🔇 Chat ${chatId} muted for ${userModel}:${userId}`);
+
+        res.status(200).json({
+            message: "Chat muted successfully",
+            mutedChats: user.notificationPreferences?.mutedChats || [],
+        });
+    } catch (err) {
+        console.error("MUTE CHAT ERROR:", err);
+        res.status(500).json({ message: "Failed to mute chat" });
+    }
+};
+
+/* ======================================================
+   UNMUTE CHAT
+   PATCH /api/notifications/unmute-chat/:chatId
+   
+   Unmutes push notifications for a specific conversation.
+====================================================== */
+exports.unmuteChat = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const userModel = req.user.role === "student" ? "Student" : "User";
+        const { chatId } = req.params;
+
+        // Validate chatId
+        if (!mongoose.Types.ObjectId.isValid(chatId)) {
+            return res.status(400).json({ message: "Invalid chat ID" });
+        }
+
+        const Model = userModel === "Student" ? Student : User;
+
+        // Remove from mutedChats
+        const user = await Model.findByIdAndUpdate(
+            userId,
+            { $pull: { "notificationPreferences.mutedChats": chatId } },
+            { new: true }
+        ).select("notificationPreferences");
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        console.log(`🔊 Chat ${chatId} unmuted for ${userModel}:${userId}`);
+
+        res.status(200).json({
+            message: "Chat unmuted successfully",
+            mutedChats: user.notificationPreferences?.mutedChats || [],
+        });
+    } catch (err) {
+        console.error("UNMUTE CHAT ERROR:", err);
+        res.status(500).json({ message: "Failed to unmute chat" });
+    }
+};
+
+/* ======================================================
+   TEST PUSH NOTIFICATION
+   POST /api/notifications/test-push
+   
+   Admin-only endpoint to manually test FCM push delivery.
+   Useful for verifying Firebase configuration.
+====================================================== */
+const { sendPushToUser } = require("../../services/pushNotification.service");
+const { isFirebaseReady } = require("../../config/firebase");
+
+exports.testPushNotification = async (req, res) => {
+    try {
+        // === PRODUCTION GUARD ===
+        // Prevent accidental usage in production
+        if (process.env.NODE_ENV === "production") {
+            return res.status(403).json({
+                success: false,
+                error: "Test push endpoint disabled in production",
+            });
+        }
+
+        // Check Firebase status
+        if (!isFirebaseReady()) {
+            return res.status(503).json({
+                success: false,
+                error: "Firebase not configured",
+                hint: "Add FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY to .env",
+            });
+        }
+
+        const { userId, title, message } = req.body;
+
+        // Validate input
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                error: "userId is required",
+            });
+        }
+
+        // Send test push notification
+        const result = await sendPushToUser(userId, {
+            type: "system",
+            title: title || "Test Push Notification",
+            message: message || "This is a test from EduNexus!",
+            metadata: {
+                testId: Date.now(),
+            },
+        });
+
+        if (result.success) {
+            console.log(`🔔 Test push sent to ${result.sent} device(s) [web]`);
+            res.status(200).json({
+                success: true,
+                sentTo: result.sent,
+                platform: "web",
+                message: "Push sent successfully",
+            });
+        } else {
+            res.status(200).json({
+                success: false,
+                sentTo: 0,
+                message: "Push not sent",
+                reason: result.reason || "User has no FCM tokens or is online",
+                hint: "Make sure the user has registered a push token and is offline",
+            });
+        }
+    } catch (err) {
+        console.error("TEST PUSH ERROR:", err);
+        res.status(500).json({
+            success: false,
+            error: err.message,
+        });
+    }
+};

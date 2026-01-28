@@ -191,6 +191,14 @@ const chatSocketHandler = (io, socket, onlineUsers) => {
                 messagePreview: content.trim(),
             });
 
+            // === INSTAGRAM-STYLE: Emit unread count update ===
+            // This allows frontend to update badge in real-time
+            const newUnreadCount = unreadCount.get(otherParticipantId.toString()) || 1;
+            io.to(`user:${otherParticipantId}`).emit("chat:unread_update", {
+                conversationId,
+                unreadCount: newUnreadCount,
+            });
+
             console.log(`📨 Message sent in chat:${conversationId} by ${userName}`);
         } catch (err) {
             console.error("chat:send error:", err);

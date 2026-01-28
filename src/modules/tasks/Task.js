@@ -82,4 +82,30 @@ taskSchema.index({ deadline: 1 });
 taskSchema.index({ status: 1 });
 taskSchema.index({ category: 1 });
 
+// ============================================================
+// COMPOUND INDEXES FOR AGGREGATION PIPELINES
+// ============================================================
+
+// Index 1: For getStudentTasks - student + deadline sorting
+// Supports: $match on student, then $sort by deadline
+taskSchema.index(
+    { student: 1, deadline: 1 },
+    { name: "student_deadline" }
+);
+
+// Index 2: For getAdvisorTasks - advisor dashboard queries
+// Supports: $match on createdBy + status + category, then $sort by deadline
+taskSchema.index(
+    { createdBy: 1, status: 1, deadline: 1 },
+    { name: "advisor_status_deadline" }
+);
+
+// Index 3: For getStudentTasksByAdvisor - advisor + student drill-down
+// Supports: $match on createdBy + student, then $sort by deadline
+taskSchema.index(
+    { createdBy: 1, student: 1, deadline: 1 },
+    { name: "advisor_student_deadline" }
+);
+
 module.exports = mongoose.model("Task", taskSchema);
+

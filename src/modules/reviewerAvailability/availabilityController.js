@@ -3,7 +3,6 @@ const User = require("../users/User");
 const ReviewSession = require("../reviews/reviewSession");
 
 // Constants
-const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const TIME_REGEX = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_STATUSES = ["available", "busy", "dnd"];
@@ -47,11 +46,6 @@ const isValidDateFormat = (date) => DATE_REGEX.test(date);
 exports.createAvailability = async (req, res) => {
   try {
     const reviewerId = req.user.id;
-
-    // Debug logging
-    console.log("📅 Create Availability Request:");
-    console.log("   User ID:", reviewerId);
-    console.log("   Body:", JSON.stringify(req.body, null, 2));
 
     const {
       // New simple format
@@ -260,28 +254,45 @@ exports.createAvailability = async (req, res) => {
 
 /* ======================================================
    GET MY AVAILABILITY
+   
+   MONGODB-CENTRIC REFACTOR (Phase 2)
+   ────────────────────────────────────────────────────────
+   BEFORE: find() + 2x .filter() for type separation
+   AFTER:  Single aggregation with $facet for parallel filters
 ====================================================== */
 exports.getMyAvailability = async (req, res) => {
   try {
     res.set("Cache-Control", "no-store");
     const reviewerId = req.user.id;
+    const mongoose = require("mongoose");
 
-    const slots = await ReviewerAvailability.find({ reviewerId }).sort({
-      availabilityType: 1,
-      dayOfWeek: 1,
-      specificDate: 1,
-      startTime: 1,
-    });
+    // === SINGLE AGGREGATION WITH $facet ===
+    // Replaces: find() + 2x .filter()
+    const result = await ReviewerAvailability.aggregate([
+      // Stage 1: Match all slots for this reviewer
+      { $match: { reviewerId: new mongoose.Types.ObjectId(reviewerId) } },
 
-    // Separate by type
-    const recurring = slots.filter(s => s.availabilityType === "recurring");
-    const specific = slots.filter(s => s.availabilityType === "specific");
+      // Stage 2: Sort (applied before $facet)
+      { $sort: { availabilityType: 1, dayOfWeek: 1, specificDate: 1, startTime: 1 } },
 
-    return res.json({
-      recurring,
-      specific,
-      all: slots,
-    });
+      // Stage 3: $facet for parallel filtering
+      {
+        $facet: {
+          recurring: [
+            { $match: { availabilityType: "recurring" } }
+          ],
+          specific: [
+            { $match: { availabilityType: "specific" } }
+          ],
+          all: []  // No filter = all documents
+        }
+      }
+    ]);
+
+    // $facet returns array with single object
+    const { recurring, specific, all } = result[0] || { recurring: [], specific: [], all: [] };
+
+    return res.json({ recurring, specific, all });
   } catch (err) {
     console.error("Get Availability Error:", err);
     res.status(500).json({ message: "Server error" });
@@ -290,16 +301,29 @@ exports.getMyAvailability = async (req, res) => {
 
 /* ======================================================
    GET AVAILABILITY BY DATE (For Advisor scheduling)
-   Returns available slots for a specific date
-   Filters out slots that already have a scheduled review
+   
+   MONGODB-CENTRIC REFACTOR (Phase 2)
+   ────────────────────────────────────────────────────────
+   BEFORE: 2 DB queries + JS .filter() + .map() + .some()
+   AFTER:  1 aggregation pipeline with $lookup + $addFields
+   
+   Performance:
+   - O(n×m) nested JS loop → O(n log m) indexed $lookup
+   - Memory: Only result set loaded, not all slots + reviews
+   
+   Pipeline Stages:
+   1. $match - Filter slots by date/dayOfWeek
+   2. $lookup - Join reviewer info
+   3. $unwind - Flatten reviewer array
+   4. $lookup - Find booked reviews for this slot
+   5. $addFields - Compute isBooked + filter past slots
+   6. $match - Remove past slots (if today)
+   7. $project - Clean up internal fields
+   8. $sort - Order by startTime
 ====================================================== */
 exports.getAvailabilityByDate = async (req, res) => {
   try {
     const { date, reviewerId } = req.query;
-
-    console.log("📅 Get Availability By Date Request:");
-    console.log("   Date:", date);
-    console.log("   ReviewerId filter:", reviewerId || "none");
 
     if (!date) {
       return res.status(400).json({ message: "Date is required" });
@@ -314,83 +338,137 @@ exports.getAvailabilityByDate = async (req, res) => {
     const dayEnd = new Date(targetDate);
     dayEnd.setHours(23, 59, 59, 999);
 
-    console.log("   Day of Week:", dayOfWeek, DAY_NAMES[dayOfWeek] || "");
-    console.log("   Day Range:", dayStart.toISOString(), "to", dayEnd.toISOString());
-
-    // Build query for availability - less restrictive to catch all slots
-    const query = {
-      $or: [
-        // Recurring slots for this day of week
-        { availabilityType: "recurring", dayOfWeek },
-        // Specific date slots for this exact date
-        {
-          availabilityType: "specific",
-          specificDate: { $gte: dayStart, $lte: dayEnd },
-        },
-      ],
-    };
-
-    // Only filter by slotType if the field exists (exclude breaks)
-    query.slotType = { $ne: "break" };
-
-    if (reviewerId) {
-      query.reviewerId = reviewerId;
-    }
-
-    console.log("   Query:", JSON.stringify(query, null, 2));
-
-    const slots = await ReviewerAvailability.find(query)
-      .populate("reviewerId", "name email domain avatar")
-      .sort({ startTime: 1 });
-
-    console.log("   Found slots:", slots.length);
-    slots.forEach((s, i) => {
-      console.log(`     [${i}] Type: ${s.availabilityType}, Day: ${s.dayOfWeek}, Date: ${s.specificDate}, Time: ${s.startTime}-${s.endTime}`);
-    });
-
-    // Get all scheduled/pending reviews for this date to filter out booked slots
-    const existingReviews = await ReviewSession.find({
-      scheduledAt: { $gte: dayStart, $lte: dayEnd },
-      status: { $in: ["scheduled", "pending"] },
-    }).select("reviewer scheduledAt");
-
-    // Get current time for filtering out past slots
+    // Current time for filtering past slots
     const now = new Date();
     const currentTimeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const isToday = dayStart.toDateString() === now.toDateString();
 
-    // Return slots with isBooked flag (filter out past slots for today only)
-    const slotsWithStatus = slots
-      .filter((slot) => {
-        // If target date is today, exclude slots where start time has passed
-        if (isToday && slot.startTime <= currentTimeStr) {
-          return false;
+    // Build base match conditions
+    const matchConditions = {
+      $or: [
+        // Recurring slots for this day of week
+        { availabilityType: "recurring", dayOfWeek: dayOfWeek },
+        // Specific date slots for this exact date
+        { availabilityType: "specific", specificDate: { $gte: dayStart, $lte: dayEnd } }
+      ],
+      slotType: { $ne: "break" }
+    };
+
+    // Add reviewer filter if provided
+    if (reviewerId) {
+      const mongoose = require("mongoose");
+      matchConditions.reviewerId = new mongoose.Types.ObjectId(reviewerId);
+    }
+
+    // === SINGLE AGGREGATION PIPELINE ===
+    // Replaces: find() + find() + .filter() + .map() + .some()
+    const pipeline = [
+      // Stage 1: Match availability slots
+      { $match: matchConditions },
+
+      // Stage 2: Lookup reviewer info (replaces .populate())
+      {
+        $lookup: {
+          from: "users",
+          localField: "reviewerId",
+          foreignField: "_id",
+          pipeline: [{ $project: { name: 1, email: 1, domain: 1, avatar: 1 } }],
+          as: "reviewerInfo"
         }
-        return true;
-      })
-      .map((slot) => {
-        // Check if this slot's time is already booked for this reviewer
-        const slotReviewerId = slot.reviewerId?._id?.toString() || slot.reviewerId?.toString();
+      },
 
-        const isBooked = existingReviews.some((review) => {
-          const reviewReviewerId = review.reviewer?.toString();
-          if (slotReviewerId !== reviewReviewerId) return false;
+      // Stage 3: Unwind reviewer (convert array to object)
+      { $unwind: { path: "$reviewerInfo", preserveNullAndEmptyArrays: true } },
 
-          // Compare times - the review is at scheduledAt time
-          const reviewTime = new Date(review.scheduledAt);
-          const reviewHour = reviewTime.getHours();
-          const reviewMinutes = reviewTime.getMinutes();
-          const reviewTimeStr = `${String(reviewHour).padStart(2, "0")}:${String(reviewMinutes).padStart(2, "0")}`;
+      // Stage 4: Lookup booked reviews for this slot's reviewer on this date
+      // This replaces the JS .some() nested loop
+      {
+        $lookup: {
+          from: "reviewsessions",
+          let: {
+            slotReviewerId: "$reviewerId",
+            slotStart: "$startTime",
+            slotEnd: "$endTime"
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$reviewer", "$$slotReviewerId"] },
+                    { $gte: ["$scheduledAt", dayStart] },
+                    { $lte: ["$scheduledAt", dayEnd] },
+                    { $in: ["$status", ["scheduled", "pending"]] }
+                  ]
+                }
+              }
+            },
+            // Compute review time string for comparison
+            {
+              $addFields: {
+                reviewTimeStr: {
+                  $dateToString: {
+                    format: "%H:%M",
+                    date: "$scheduledAt",
+                    timezone: "Asia/Kolkata"
+                  }
+                }
+              }
+            },
+            // Match only reviews that fall within this slot's time
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $gte: ["$reviewTimeStr", "$$slotStart"] },
+                    { $lt: ["$reviewTimeStr", "$$slotEnd"] }
+                  ]
+                }
+              }
+            },
+            { $limit: 1 } // Only need to know if ANY exist
+          ],
+          as: "_bookedReviews"
+        }
+      },
 
-          // Check if review time falls within slot time
-          return reviewTimeStr >= slot.startTime && reviewTimeStr < slot.endTime;
-        });
+      // Stage 5: Add computed fields
+      {
+        $addFields: {
+          // isBooked = true if any matching review exists
+          isBooked: { $gt: [{ $size: "$_bookedReviews" }, 0] },
+          // isPast = true if today and startTime <= currentTime
+          _isPast: isToday ? { $lte: ["$startTime", currentTimeStr] } : false,
+          // Restructure reviewerId to match populate() output
+          reviewerId: {
+            _id: "$reviewerId",
+            name: "$reviewerInfo.name",
+            email: "$reviewerInfo.email",
+            domain: "$reviewerInfo.domain",
+            avatar: "$reviewerInfo.avatar"
+          }
+        }
+      },
 
-        // Return slot with isBooked flag
-        return { ...slot.toObject(), isBooked };
-      });
+      // Stage 6: Filter out past slots (only if today)
+      { $match: { _isPast: { $ne: true } } },
 
-    return res.json(slotsWithStatus);
+      // Stage 7: Clean up internal fields
+      {
+        $project: {
+          _bookedReviews: 0,
+          _isPast: 0,
+          reviewerInfo: 0
+        }
+      },
+
+      // Stage 8: Sort by start time
+      { $sort: { startTime: 1 } }
+    ];
+
+    const slots = await ReviewerAvailability.aggregate(pipeline);
+
+    return res.json(slots);
   } catch (err) {
     console.error("Get Availability By Date Error:", err);
     res.status(500).json({ message: "Server error" });
@@ -515,24 +593,43 @@ exports.createBreak = async (req, res) => {
 
 /* ======================================================
    GET ALL (slots + breaks) for Weekly Grid
+   
+   MONGODB-CENTRIC REFACTOR (Phase 2)
+   ────────────────────────────────────────────────────────
+   BEFORE: find() + 2x .filter() for slots/breaks separation
+   AFTER:  Single aggregation with $facet for parallel filters
 ====================================================== */
 exports.getAllAvailability = async (req, res) => {
   try {
     const reviewerId = req.user.id;
+    const mongoose = require("mongoose");
 
-    const slots = await ReviewerAvailability.find({ reviewerId }).sort({
-      dayOfWeek: 1,
-      startTime: 1,
-    });
+    // === SINGLE AGGREGATION WITH $facet ===
+    // Replaces: find() + 2x .filter()
+    const result = await ReviewerAvailability.aggregate([
+      // Stage 1: Match all items for this reviewer
+      { $match: { reviewerId: new mongoose.Types.ObjectId(reviewerId) } },
 
-    // Separate slots and breaks
-    const availability = slots.filter(s => s.slotType !== "break");
-    const breaks = slots.filter(s => s.slotType === "break");
+      // Stage 2: Sort before $facet
+      { $sort: { dayOfWeek: 1, startTime: 1 } },
 
-    return res.json({
-      availability,
-      breaks,
-    });
+      // Stage 3: $facet for parallel filtering
+      {
+        $facet: {
+          availability: [
+            { $match: { slotType: { $ne: "break" } } }
+          ],
+          breaks: [
+            { $match: { slotType: "break" } }
+          ]
+        }
+      }
+    ]);
+
+    // $facet returns array with single object
+    const { availability, breaks } = result[0] || { availability: [], breaks: [] };
+
+    return res.json({ availability, breaks });
   } catch (err) {
     console.error("Get All Availability Error:", err);
     res.status(500).json({ message: "Server error" });

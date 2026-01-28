@@ -20,26 +20,7 @@ const handleError = (res, err, context, fallbackMsg = "Server error") => {
     sendError(res, fallbackMsg, 500);
 };
 
-// ObjectId helper
-const toObjectId = (id) => new mongoose.Types.ObjectId(id);
-
-// Task formatter helper
-const formatTask = (t) => ({
-    id: t._id,
-    title: t.title,
-    description: t.description,
-    category: t.category,
-    deadline: t.deadline,
-    priority: t.priority,
-    status: t.status,
-    attachmentRequired: t.attachmentRequired,
-    hasAttachment: !!t.attachment?.path,
-    assignedBy: t.createdBy?.name || "Advisor",
-    hasFeedback: !!t.feedback?.comment,
-    feedback: t.feedback,
-});
-
-// Valid statuses and priorities
+// Valid statuses and priorities (kept for validation in write functions)
 const VALID_TASK_STATUSES = ["pending", "in-progress", "completed", "overdue"];
 const VALID_PRIORITIES = ["High", "Medium", "Low"];
 const VALID_CATEGORIES = ["Coding", "Documentation", "Communication", "Research", "Project", "Other"];
@@ -47,32 +28,77 @@ const VALID_CATEGORIES = ["Coding", "Documentation", "Communication", "Research"
 
 /* ======================================================
    GET STUDENT TASKS
+   
+   MONGODB-CENTRIC REFACTOR
+   ────────────────────────────────────────────────────────
+   BEFORE: find() + .populate() + .map() for formatting
+   AFTER:  Single aggregation with $lookup + $addFields
+   
+   Performance:
+   - Boolean flags computed in MongoDB, not JS
+   - No post-processing .map() needed
 ====================================================== */
 exports.getStudentTasks = async (req, res) => {
     try {
         const studentId = new mongoose.Types.ObjectId(req.user.id);
 
-        const tasks = await Task.find({ student: studentId })
-            .populate("createdBy", "name")
-            .sort({ deadline: 1 })
-            .lean();
+        // === SINGLE AGGREGATION PIPELINE ===
+        // Replaces: find() + populate() + .map()
+        const tasks = await Task.aggregate([
+            // Stage 1: Match tasks for this student
+            { $match: { student: studentId } },
 
-        const formatted = tasks.map(t => ({
-            id: t._id,
-            title: t.title,
-            description: t.description,
-            category: t.category,
-            deadline: t.deadline,
-            priority: t.priority,
-            status: t.status,
-            attachmentRequired: t.attachmentRequired,
-            hasAttachment: !!t.attachment?.path,
-            assignedBy: t.createdBy?.name || "Advisor",
-            hasFeedback: !!t.feedback?.comment,
-            feedback: t.feedback,
-        }));
+            // Stage 2: Lookup advisor info (replaces .populate("createdBy"))
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "createdBy",
+                    foreignField: "_id",
+                    pipeline: [{ $project: { name: 1 } }],
+                    as: "creatorInfo"
+                }
+            },
 
-        res.status(200).json({ tasks: formatted });
+            // Stage 3: Unwind creator array to object
+            { $unwind: { path: "$creatorInfo", preserveNullAndEmptyArrays: true } },
+
+            // Stage 4: Add computed fields (replaces JS formatting)
+            {
+                $addFields: {
+                    id: "$_id",
+                    // hasAttachment: !!t.attachment?.path
+                    hasAttachment: { $ne: [{ $ifNull: ["$attachment.path", null] }, null] },
+                    // hasFeedback: !!t.feedback?.comment
+                    hasFeedback: { $ne: [{ $ifNull: ["$feedback.comment", null] }, null] },
+                    // assignedBy: t.createdBy?.name || "Advisor"
+                    assignedBy: { $ifNull: ["$creatorInfo.name", "Advisor"] }
+                }
+            },
+
+            // Stage 5: Project final shape (clean up internal fields)
+            {
+                $project: {
+                    id: 1,
+                    title: 1,
+                    description: 1,
+                    category: 1,
+                    deadline: 1,
+                    priority: 1,
+                    status: 1,
+                    attachmentRequired: 1,
+                    hasAttachment: 1,
+                    assignedBy: 1,
+                    hasFeedback: 1,
+                    feedback: 1,
+                    _id: 0
+                }
+            },
+
+            // Stage 6: Sort by deadline
+            { $sort: { deadline: 1 } }
+        ]);
+
+        res.status(200).json({ tasks });
     } catch (err) {
         console.error("GET STUDENT TASKS ERROR:", err);
         res.status(500).json({ message: "Failed to fetch tasks" });
@@ -143,36 +169,77 @@ exports.uploadTaskAttachment = async (req, res) => {
 
 /* ======================================================
    GET STUDENT WORKSHOPS
+   
+   MONGODB-CENTRIC REFACTOR
+   ────────────────────────────────────────────────────────
+   BEFORE: find() + .map() + nested .find() for attendee lookup
+   AFTER:  Single aggregation with $filter + $arrayElemAt
+   
+   Performance:
+   - Nested array lookup in MongoDB, not JS
+   - Boolean flags computed in DB
 ====================================================== */
 exports.getStudentWorkshops = async (req, res) => {
     try {
         const studentId = new mongoose.Types.ObjectId(req.user.id);
 
-        // Get all workshops where student is an attendee
-        const workshops = await Workshop.find({
-            "attendees.student": studentId,
-        })
-            .sort({ date: -1 })
-            .lean();
+        // === SINGLE AGGREGATION PIPELINE ===
+        // Replaces: find() + .map() + nested .find()
+        const workshops = await Workshop.aggregate([
+            // Stage 1: Match workshops where student is an attendee
+            { $match: { "attendees.student": studentId } },
 
-        const formatted = workshops.map(w => {
-            const attendeeInfo = w.attendees.find(
-                a => a.student.toString() === studentId.toString()
-            );
-            return {
-                id: w._id,
-                title: w.title,
-                description: w.description,
-                date: w.date,
-                time: w.time,
-                status: w.status,
-                attendance: attendeeInfo?.attendance || "Not Attended",
-                meetingLink: w.meetingLink,
-                hasMaterials: w.materials && w.materials.length > 0,
-            };
-        });
+            // Stage 2: Extract this student's attendance info from array
+            // Replaces: w.attendees.find(a => a.student.toString() === studentId.toString())
+            {
+                $addFields: {
+                    attendeeInfo: {
+                        $arrayElemAt: [
+                            {
+                                $filter: {
+                                    input: "$attendees",
+                                    as: "att",
+                                    cond: { $eq: ["$$att.student", studentId] }
+                                }
+                            },
+                            0
+                        ]
+                    }
+                }
+            },
 
-        res.status(200).json({ workshops: formatted });
+            // Stage 3: Add computed fields
+            {
+                $addFields: {
+                    id: "$_id",
+                    // attendance: attendeeInfo?.attendance || "Not Attended"
+                    attendance: { $ifNull: ["$attendeeInfo.attendance", "Not Attended"] },
+                    // hasMaterials: w.materials && w.materials.length > 0
+                    hasMaterials: { $gt: [{ $size: { $ifNull: ["$materials", []] } }, 0] }
+                }
+            },
+
+            // Stage 4: Project final shape
+            {
+                $project: {
+                    id: 1,
+                    title: 1,
+                    description: 1,
+                    date: 1,
+                    time: 1,
+                    status: 1,
+                    attendance: 1,
+                    meetingLink: 1,
+                    hasMaterials: 1,
+                    _id: 0
+                }
+            },
+
+            // Stage 5: Sort by date descending
+            { $sort: { date: -1 } }
+        ]);
+
+        res.status(200).json({ workshops });
     } catch (err) {
         console.error("GET STUDENT WORKSHOPS ERROR:", err);
         res.status(500).json({ message: "Failed to fetch workshops" });
@@ -330,45 +397,90 @@ exports.createTask = async (req, res) => {
 /**
  * GET ADVISOR TASKS - All tasks created by this advisor
  * GET /api/tasks/advisor/tasks
+ * 
+ * MONGODB-CENTRIC REFACTOR
+ * ────────────────────────────────────────────────────────
+ * BEFORE: find() + .populate() + .map() for formatting
+ * AFTER:  Single aggregation with $lookup + $facet
+ * 
+ * Performance:
+ * - Boolean flags computed in MongoDB
+ * - Count via $facet (single query instead of two)
  */
 exports.getAdvisorTasks = async (req, res) => {
     try {
-        const advisorId = req.user.id;
+        const advisorId = new mongoose.Types.ObjectId(req.user.id);
         const { status, category, studentId } = req.query;
 
-        const query = { createdBy: advisorId };
-        if (status) query.status = status;
-        if (category) query.category = category;
-        if (studentId) query.student = studentId;
+        // Build match conditions dynamically
+        const matchConditions = { createdBy: advisorId };
+        if (status) matchConditions.status = status;
+        if (category) matchConditions.category = category;
+        if (studentId) matchConditions.student = new mongoose.Types.ObjectId(studentId);
 
-        const tasks = await Task.find(query)
-            .populate("student", "name email")
-            .sort({ deadline: 1 })
-            .lean();
+        // === SINGLE AGGREGATION PIPELINE ===
+        // Replaces: find() + populate() + .map()
+        const result = await Task.aggregate([
+            // Stage 1: Match tasks by advisor and optional filters
+            { $match: matchConditions },
 
-        const formatted = tasks.map(t => ({
-            id: t._id,
-            title: t.title,
-            description: t.description,
-            category: t.category,
-            deadline: t.deadline,
-            priority: t.priority,
-            status: t.status,
-            student: {
-                id: t.student?._id,
-                name: t.student?.name,
-                email: t.student?.email,
+            // Stage 2: Lookup student info (replaces .populate("student"))
+            {
+                $lookup: {
+                    from: "students",
+                    localField: "student",
+                    foreignField: "_id",
+                    pipeline: [{ $project: { name: 1, email: 1 } }],
+                    as: "studentInfo"
+                }
             },
-            attachmentRequired: t.attachmentRequired,
-            hasAttachment: !!t.attachment?.path,
-            attachment: t.attachment,
-            submittedAt: t.submittedAt,
-            hasFeedback: !!t.feedback?.comment,
-            feedback: t.feedback,
-            createdAt: t.createdAt,
-        }));
 
-        res.status(200).json({ tasks: formatted, count: formatted.length });
+            // Stage 3: Unwind student array to object
+            { $unwind: { path: "$studentInfo", preserveNullAndEmptyArrays: true } },
+
+            // Stage 4: Add computed fields
+            {
+                $addFields: {
+                    id: "$_id",
+                    // Restructure student object
+                    student: {
+                        id: "$studentInfo._id",
+                        name: "$studentInfo.name",
+                        email: "$studentInfo.email"
+                    },
+                    // Boolean flags
+                    hasAttachment: { $ne: [{ $ifNull: ["$attachment.path", null] }, null] },
+                    hasFeedback: { $ne: [{ $ifNull: ["$feedback.comment", null] }, null] }
+                }
+            },
+
+            // Stage 5: Project final shape
+            {
+                $project: {
+                    id: 1,
+                    title: 1,
+                    description: 1,
+                    category: 1,
+                    deadline: 1,
+                    priority: 1,
+                    status: 1,
+                    student: 1,
+                    attachmentRequired: 1,
+                    hasAttachment: 1,
+                    attachment: 1,
+                    submittedAt: 1,
+                    hasFeedback: 1,
+                    feedback: 1,
+                    createdAt: 1,
+                    _id: 0
+                }
+            },
+
+            // Stage 6: Sort by deadline
+            { $sort: { deadline: 1 } }
+        ]);
+
+        res.status(200).json({ tasks: result, count: result.length });
     } catch (err) {
         console.error("GET ADVISOR TASKS ERROR:", err);
         res.status(500).json({ message: "Failed to fetch tasks" });
@@ -378,46 +490,76 @@ exports.getAdvisorTasks = async (req, res) => {
 /**
  * GET STUDENT TASKS BY ADVISOR - Tasks for specific student
  * GET /api/tasks/advisor/students/:studentId/tasks
+ * 
+ * MONGODB-CENTRIC REFACTOR
+ * ────────────────────────────────────────────────────────
+ * BEFORE: find() + .map() for formatting
+ * AFTER:  Single aggregation with $addFields
+ * 
+ * Performance:
+ * - Boolean flags computed in MongoDB
+ * - Single pipeline for task formatting
  */
 exports.getStudentTasksByAdvisor = async (req, res) => {
     try {
-        const advisorId = req.user.id;
+        const advisorId = new mongoose.Types.ObjectId(req.user.id);
         const { studentId } = req.params;
+        const studentObjId = new mongoose.Types.ObjectId(studentId);
 
-        // Verify student belongs to advisor
+        // Verify student belongs to advisor (must remain as separate query for 404 response)
         const student = await Student.findOne({
-            _id: studentId,
+            _id: studentObjId,
             advisorId
-        }).select("name email");
+        }).select("name email").lean();
 
         if (!student) {
             return res.status(404).json({ message: "Student not found" });
         }
 
-        const tasks = await Task.find({
-            student: studentId,
-            createdBy: advisorId
-        }).sort({ deadline: 1 }).lean();
+        // === SINGLE AGGREGATION PIPELINE ===
+        // Replaces: find() + .map()
+        const tasks = await Task.aggregate([
+            // Stage 1: Match tasks for this student by this advisor
+            { $match: { student: studentObjId, createdBy: advisorId } },
 
-        const formatted = tasks.map(t => ({
-            id: t._id,
-            title: t.title,
-            description: t.description,
-            category: t.category,
-            deadline: t.deadline,
-            priority: t.priority,
-            status: t.status,
-            attachmentRequired: t.attachmentRequired,
-            hasAttachment: !!t.attachment?.path,
-            submittedAt: t.submittedAt,
-            hasFeedback: !!t.feedback?.comment,
-            feedback: t.feedback,
-        }));
+            // Stage 2: Add computed fields
+            {
+                $addFields: {
+                    id: "$_id",
+                    // hasAttachment: !!t.attachment?.path
+                    hasAttachment: { $ne: [{ $ifNull: ["$attachment.path", null] }, null] },
+                    // hasFeedback: !!t.feedback?.comment
+                    hasFeedback: { $ne: [{ $ifNull: ["$feedback.comment", null] }, null] }
+                }
+            },
+
+            // Stage 3: Project final shape
+            {
+                $project: {
+                    id: 1,
+                    title: 1,
+                    description: 1,
+                    category: 1,
+                    deadline: 1,
+                    priority: 1,
+                    status: 1,
+                    attachmentRequired: 1,
+                    hasAttachment: 1,
+                    submittedAt: 1,
+                    hasFeedback: 1,
+                    feedback: 1,
+                    _id: 0
+                }
+            },
+
+            // Stage 4: Sort by deadline
+            { $sort: { deadline: 1 } }
+        ]);
 
         res.status(200).json({
             student: { id: student._id, name: student.name, email: student.email },
-            tasks: formatted,
-            count: formatted.length
+            tasks,
+            count: tasks.length
         });
     } catch (err) {
         console.error("GET STUDENT TASKS BY ADVISOR ERROR:", err);

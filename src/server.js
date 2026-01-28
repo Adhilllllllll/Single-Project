@@ -57,8 +57,23 @@ const PORT = process.env.PORT || 5000;
     await connectDB();
     await seedAdmin();
 
+    // Initialize Firebase for push notifications
+    const { initializeFirebase } = require("./config/firebase");
+    initializeFirebase();
+
     const httpServer = createServer(app);
     initializeSocket(httpServer);
+
+    // === DEV STABILITY: Handle port conflicts gracefully ===
+    httpServer.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.error(`\n❌ Port ${PORT} is already in use!`);
+        console.error(`   Run: taskkill /F /IM node.exe  (Windows)`);
+        console.error(`   Or change PORT in .env\n`);
+        process.exit(1);
+      }
+      throw err;
+    });
 
     httpServer.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
