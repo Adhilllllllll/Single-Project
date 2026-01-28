@@ -1,4 +1,8 @@
  
+<<<<<<< HEAD
+=======
+
+>>>>>>> 4a72aeba7b77662172c7d51d0ffbc0e6efa44470
 const mongoose = require("mongoose");
 const User = require("../users/User");
 const Student = require("../students/student");
