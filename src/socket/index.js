@@ -23,7 +23,9 @@ const initializeSocket = (httpServer) => {
         "http://localhost:5175",
         process.env.FRONTEND_URL,
         process.env.CLIENT_URL,
+        "https://edunexus.adhilp.in",
         "https://edunexus-client-one.vercel.app",
+        "https://adhilp.in",
     ].filter(Boolean);
 
     const io = new Server(httpServer, {

@@ -204,9 +204,9 @@ const allowedOrigins = [
   "http://localhost:5174",
   "http://localhost:5175",
   process.env.FRONTEND_URL,
- 
-   // "https://edunexus-client-one.vercel.app",
-  "http://edunexuss.duckdns.org",
+  "https://edunexus.adhilp.in",
+  "https://edunexus-client-one.vercel.app",
+  "https://adhilp.in",
 ].filter(Boolean);
 
 app.use(
