@@ -388,18 +388,7 @@ exports.markAsRead = async (req, res) => {
     }
 };
 
-/* ======================================================
-   GET SUGGESTED CONTACTS
-   GET /api/chat/contacts
-   Returns users the current user can chat with
-   
-   REFACTORED: High-Traffic Optimization
-   - REMOVED: JS map for transformation
-   - REMOVED: JS forEach for iteration  
-   - REMOVED: JS Set for deduplication (replaced with $group)
-   - ADDED: Role-based aggregations with $lookup and $project
-   - ADDED: $group for duplicate removal at DB level
-====================================================== */
+ 
 exports.getContacts = async (req, res) => {
     try {
         const userId = req.user.id;
