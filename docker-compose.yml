@@ -13,6 +13,8 @@ services:
     environment:
       - NODE_ENV=production
     restart: always
+    volumes:
+      - ./uploads:/app/uploads
     networks:
       - rms-network
 
