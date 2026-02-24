@@ -1,6 +1,39 @@
-node_modules
+# Dependencies
+node_modules/
 
+# Environment files
 .env
+.env.local
+.env.production
 
+# AWS / SSH keys
+*.pem
+*.key
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Installers
+*.msi
+
+# Misc
+*.pdf
+backend/uploads/
 database.js
 
+# Backup / Temporary
+RMS-Client/
+git_diff.txt
+git_pages.txt
+git_porcelain.txt
+git_status.txt

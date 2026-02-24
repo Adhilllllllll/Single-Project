@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EduNexus – Technical Interview Q&A</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --yellow: #d29922;
+            --red: #f85149;
+            --purple: #bc8cff;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --tag-bg: #1f2937;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            line-height: 1.7;
+            padding: 2rem 1rem;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2rem;
+            color: var(--accent);
+            margin-bottom: .4rem;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--muted);
+            margin-bottom: 2.5rem;
+            font-size: .95rem;
+        }
+
+        .toc {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.2rem 1.8rem;
+            max-width: 860px;
+            margin: 0 auto 2.5rem;
+        }
+
+        .toc h2 {
+            color: var(--purple);
+            font-size: 1rem;
+            margin-bottom: .6rem;
+        }
+
+        .toc ol {
+            padding-left: 1.2rem;
+            font-size: .88rem;
+            color: var(--muted);
+            line-height: 2;
+        }
+
+        .toc a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .toc a:hover {
+            text-decoration: underline;
+        }
+
+        .section-label {
+            max-width: 860px;
+            margin: 2rem auto .6rem;
+            font-size: .78rem;
+            font-weight: 700;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            padding-left: .3rem;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem 1.8rem;
+            max-width: 860px;
+            margin: 0 auto 1.4rem;
+            position: relative;
+        }
+
+        .card:hover {
+            border-color: var(--accent);
+            transition: border-color .2s;
+        }
+
+        .q-num {
+            position: absolute;
+            top: 1.2rem;
+            right: 1.4rem;
+            font-size: .75rem;
+            color: var(--muted);
+            background: var(--bg);
+            padding: .2rem .6rem;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .question {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 1rem;
+        }
+
+        .tag {
+            display: inline-block;
+            font-size: .72rem;
+            padding: .2rem .6rem;
+            border-radius: 4px;
+            margin-right: .4rem;
+            margin-bottom: .6rem;
+            font-weight: 600;
+        }
+
+        .tag-test {
+            background: #1a2a1a;
+            color: var(--green);
+            border: 1px solid #2d4a2d;
+        }
+
+        .tag-section {
+            background: #1a1a2a;
+            color: var(--accent);
+            border: 1px solid #2d2d4a;
+        }
+
+        .block {
+            margin-top: .9rem;
+        }
+
+        .block-title {
+            font-size: .78rem;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            margin-bottom: .45rem;
+        }
+
+        .block-title.testing {
+            color: var(--yellow);
+        }
+
+        .block-title.answer {
+            color: var(--green);
+        }
+
+        .block-title.followup {
+            color: var(--purple);
+        }
+
+        .block-title.followup-answer {
+            color: var(--accent);
+        }
+
+        .block p,
+        .block li {
+            font-size: .92rem;
+            color: #c9d1d9;
+            line-height: 1.75;
+        }
+
+        .block ul,
+        .block ol {
+            padding-left: 1.3rem;
+        }
+
+        .block li {
+            margin-bottom: .25rem;
+        }
+
+        code {
+            background: #0d2137;
+            color: #79c0ff;
+            padding: .1rem .35rem;
+            border-radius: 4px;
+            font-size: .85rem;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+        }
+
+        .highlight-box {
+            background: #0d2a1a;
+            border-left: 3px solid var(--green);
+            border-radius: 4px;
+            padding: .7rem 1rem;
+            margin-top: .6rem;
+            font-size: .88rem;
+            color: #adf5bf;
+        }
+
+        .warn-box {
+            background: #2a1a0d;
+            border-left: 3px solid var(--yellow);
+            border-radius: 4px;
+            padding: .7rem 1rem;
+            margin-top: .6rem;
+            font-size: .88rem;
+            color: #f5d6a3;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid var(--border);
+            max-width: 860px;
+            margin: 1rem auto;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🎯 EduNexus – Technical Interview</h1>
+    <p class="subtitle">Role-Based MERN Stack · JWT · Socket.IO · Docker · AWS EC2 · MongoDB</p>
+
+    <div class="toc">
+        <h2>📋 Table of Contents</h2>
+        <ol>
+            <li><a href="#q1">Project Overview</a></li>
+            <li><a href="#q2">React Architecture & State Management</a></li>
+            <li><a href="#q3">JWT Authentication Flow</a></li>
+            <li><a href="#q4">Role-Based Access Control</a></li>
+            <li><a href="#q5">MongoDB Schema Design</a></li>
+            <li><a href="#q6">MongoDB Queries & Indexing</a></li>
+            <li><a href="#q7">REST API Design</a></li>
+            <li><a href="#q8">Socket.IO – Real-Time System</a></li>
+            <li><a href="#q9">Concurrency & Multiple Users</a></li>
+            <li><a href="#q10">Error Handling</a></li>
+            <li><a href="#q11">Security Vulnerabilities</a></li>
+            <li><a href="#q12">Docker & Deployment</a></li>
+            <li><a href="#q13">Nginx Configuration</a></li>
+            <li><a href="#q14">Performance Optimization</a></li>
+            <li><a href="#q15">Scalability – 10 vs 10,000 Users</a></li>
+            <li><a href="#q16">Caching & Rate Limiting</a></li>
+            <li><a href="#q17">Logging & Monitoring</a></li>
+            <li><a href="#q18">Debugging & Production Problems</a></li>
+        </ol>
+    </div>
+
+    <!-- ===== Q1 ===== -->
+    <div class="section-label">🔹 Introduction</div>
+    <div class="card" id="q1">
+        <span class="q-num">Q1</span>
+        <div><span class="tag tag-section">Project Overview</span></div>
+        <p class="question">Walk me through EduNexus. What problem does it solve, how did you architect it, and what
+            were the biggest technical challenges you personally solved?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Whether you actually built it, understand the big picture, can articulate decisions, and distinguish your
+                contribution from boilerplate.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>EduNexus is a review management platform for academic institutions — think of it as a structured feedback
+                loop between students, faculty, and admins. The core problem was that institutions were managing review
+                cycles over email, which caused delays, lost submissions, and no audit trail.</p>
+            <br>
+            <p>Architecturally, I went with a decoupled MERN setup — React SPA on the frontend talking to an Express
+                REST API. MongoDB made sense because the review schema is semi-structured and evolves with each
+                institution's workflow. I used Redux Toolkit for global state because I needed auth state, notification
+                badge counts, and real-time messages to be accessible across deeply nested components.</p>
+            <br>
+            <p>The three things I personally owned that were most complex were: <strong>(1)</strong> the JWT + RBAC
+                middleware pipeline — making sure each route enforces role and ownership checks without duplicating
+                logic; <strong>(2)</strong> the Socket.IO room system — each user joins their own userId room so
+                targeted notifications don't broadcast to everyone; and <strong>(3)</strong> the Docker + Nginx
+                production setup on EC2, where I debugged an HTTP/2 protocol error that was silently breaking login
+                responses in production.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up the Interviewer Will Ask</div>
+            <p>You mentioned the HTTP/2 issue in production. What exactly was happening and how did you find the root
+                cause?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>The frontend on Vercel was hitting the EC2 backend through Nginx. Login POST requests were returning
+                <code>ERR_HTTP2_PROTOCOL_ERROR</code>. The JWT response body was being sent, but the browser was
+                dropping it. I checked Nginx error logs — saw stream reset errors. Nginx was negotiating HTTP/2 with the
+                Express backend, but the Express server wasn't an HTTP/2 server — it was plain HTTP. So Nginx was
+                forwarding in HTTP/2, Express replied in HTTP/1.1, Nginx couldn't translate the response back cleanly.
+                Fix was simple: disabled HTTP/2 in the Nginx <code>listen</code> directive — changed
+                <code>listen 443 ssl http2</code> to just <code>listen 443 ssl</code>. Verified in Chrome Network tab
+                that responses started coming through immediately.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q2 ===== -->
+    <div class="section-label">🔹 React & State Management</div>
+    <div class="card" id="q2">
+        <span class="q-num">Q2</span>
+        <div><span class="tag tag-section">React Architecture</span><span class="tag tag-test">Redux Toolkit</span>
+        </div>
+        <p class="question">Why Redux Toolkit over React Context? In a review management app how much state actually
+            needed to be global?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Whether you blindly used Redux because everyone does, or made a conscious trade-off decision. They want
+                to catch over-engineering.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>Honestly, I considered Context first for auth. But the moment I added real-time notifications — where the
+                bell icon, the notification list, and the chat badge all need the same live data — I realized Context
+                would cause excessive re-renders across the tree every time a Socket.IO event came in.</p>
+            <br>
+            <p>What ended up in Redux was limited: <strong>auth slice</strong> (user, token, role), <strong>notification
+                    slice</strong> (unread count, notification list), and <strong>chat slice</strong> (active
+                conversation, unread messages). Everything local — form state, loading spinners, modal open/close —
+                stayed in <code>useState</code>. I used RTK Query for API calls on the heavier data-fetching pages like
+                admin dashboards, so I got caching and auto-refetch for free without writing thunks manually.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>When a Socket.IO event arrives, exactly how does it update Redux and re-render the notification bell?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>In a top-level component (I put it in <code>App.js</code> inside a <code>useEffect</code>), I listen to
+                the socket event — say
+                <code>socket.on('new_notification', (data) => { dispatch(addNotification(data)) })</code>. The
+                <code>addNotification</code> reducer in the notification slice pushes to the array and increments the
+                unread count. The bell component is connected via <code>useSelector</code> so it re-renders only that
+                component, not the whole tree. That's the key advantage over Context — Redux's selector subscription is
+                surgical.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q3 ===== -->
+    <div class="section-label">🔹 Authentication</div>
+    <div class="card" id="q3">
+        <span class="q-num">Q3</span>
+        <div><span class="tag tag-section">JWT Auth</span></div>
+        <p class="question">Walk me through your exact JWT implementation — token generation, storage on client, and how
+            it's sent on every request. What happens when the token expires?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Security awareness — localStorage vs cookies, token expiry handling, refresh token strategy, and whether
+                you understand XSS vs CSRF trade-offs.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>On login, the backend signs a JWT with <code>jsonwebtoken</code> — payload includes <code>userId</code>,
+                <code>role</code>, and <code>iat</code>. I set a 1-day expiry for the access token. On the client, I
+                store it in <code>localStorage</code> and set it in the Redux auth slice. Every API call goes through an
+                Axios instance with a request interceptor that attaches
+                <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+            <br>
+            <p>For expiry handling — when the server returns a 401, the Axios response interceptor catches it,
+                dispatches a <code>logout</code> action to clear Redux and localStorage, and redirects to login. I
+                didn't implement refresh tokens in v1 — which is a known gap. If I were scaling this, I'd add an
+                <code>httpOnly</code> cookie-based refresh token so the access token can be short-lived (15 min) and the
+                refresh token is XSS-safe.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>Why is storing JWT in localStorage a security risk? How would you fix it without breaking your current
+                flow?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>localStorage is accessible to any JavaScript on the page — so if there's an XSS vulnerability anywhere (a
+                third-party script, unsanitized user input rendered as HTML), an attacker can steal the token. The fix
+                is to store the JWT in an <code>httpOnly; Secure; SameSite=Strict</code> cookie, which JavaScript can't
+                read. The backend sets it via <code>Set-Cookie</code> header. On the frontend I'd remove the Axios
+                Authorization header interceptor — the browser sends the cookie automatically. The trade-off is CSRF
+                vulnerability, which I'd mitigate with a CSRF token or by using <code>SameSite=Strict</code> which
+                blocks cross-origin requests from sending the cookie.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q4 ===== -->
+    <div class="card" id="q4">
+        <span class="q-num">Q4</span>
+        <div><span class="tag tag-section">RBAC</span></div>
+        <p class="question">How did you implement role-based access control? Show me the flow from route definition to
+            what happens if a student hits an admin-only endpoint.</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Whether RBAC is just frontend-guarded (which is insecure) or properly enforced on the API layer.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>I have two middleware layers. First is <code>verifyToken</code> — it reads the <code>Authorization</code>
+                header, calls <code>jwt.verify()</code>, and attaches <code>req.user</code> (userId + role) to the
+                request. Second is <code>authorizeRoles(...roles)</code> — a factory function that returns middleware
+                checking if <code>req.user.role</code> is in the allowed list.</p>
+            <br>
+            <p>In the router: <code>router.delete('/user/:id', verifyToken, authorizeRoles('admin'), deleteUser)</code>.
+                If a student hits that endpoint, <code>verifyToken</code> passes (token is valid), but
+                <code>authorizeRoles</code> checks the role from the decoded token — not the database, not the frontend
+                — and returns a 403 with a message like "Access denied: insufficient role". The key is the role is
+                embedded in the signed JWT, so it can't be tampered with client-side.</p>
+            <div class="warn-box">⚠️ Gap to acknowledge: If an admin's role changes in the DB while their token is still
+                valid, they'd retain elevated access until the token expires. The fix is to validate the role against
+                the DB on sensitive actions, or use short-lived tokens.</div>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What about ownership checks? Can Student A see Student B's reviews?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Role check alone isn't enough — that's authorization vs ownership. In the controller, after confirming
+                the role, I also compare <code>req.user.userId</code> against the document's owner field. For example, a
+                student can only fetch reviews where <code>review.submittedBy === req.user.userId</code>. For admin
+                routes, ownership is bypassed. I push the ownership filter directly into the MongoDB query —
+                <code>Review.find({ submittedBy: req.user.userId })</code> — rather than fetching all and filtering in
+                JS, which would be a data leak risk.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q5 ===== -->
+    <div class="section-label">🔹 Database Design</div>
+    <div class="card" id="q5">
+        <span class="q-num">Q5</span>
+        <div><span class="tag tag-section">MongoDB Schema</span></div>
+        <p class="question">Describe your MongoDB schema for a Review. Why did you choose embedding vs referencing for
+            related data like faculty and student info?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Schema design decisions, understanding of embedding vs referencing trade-offs in document databases, and
+                awareness of data growth implications.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>My Review schema has <code>submittedBy</code> (ref to User), <code>assignedFaculty</code> (ref to User),
+                <code>content</code>, <code>status</code> (enum: pending/approved/rejected), <code>mode</code>
+                (online/offline), <code>scheduledAt</code>, and <code>meetingLink</code>. I used references rather than
+                embedding for user data because user profiles change — if I embedded the student's name and it changed,
+                I'd have stale data across hundreds of reviews. With references I do a <code>.populate()</code> when I
+                need the full profile.</p>
+            <br>
+            <p>The one thing I did embed was a <code>history</code> array — each time a review's status changes, I push
+                <code>{ status, changedBy, changedAt, comment }</code> into an array on the review document. That made
+                sense to embed because it's append-only, tightly coupled to the review lifecycle, and I always query it
+                together with the review — never independently.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>If a student submits 5,000 reviews, will that history array cause problems?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Good catch. MongoDB has a 16MB document size limit. Each history entry is maybe 200–300 bytes — so 5000
+                entries is around 1.5MB, which is fine. But if this were a high-throughput system, I'd separate history
+                into its own <code>ReviewAuditLog</code> collection with a <code>reviewId</code> reference, paginate it
+                separately, and only return the latest 5 entries with the review. That keeps the core review document
+                lean and queries fast.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q6 ===== -->
+    <div class="card" id="q6">
+        <span class="q-num">Q6</span>
+        <div><span class="tag tag-section">MongoDB</span><span class="tag tag-test">Indexing</span></div>
+        <p class="question">What indexes did you create in MongoDB? How do you know your queries are actually using
+            them?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Whether you just define schemas and hope for the best, or actually think about query patterns and verify
+                performance with explain plans.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>The two most frequent queries drove my indexing decisions. Students always fetch their own reviews — so I
+                indexed <code>{ submittedBy: 1, status: 1 }</code> as a compound index. Admin fetches reviews by faculty
+                and date range — so <code>{ assignedFaculty: 1, scheduledAt: -1 }</code>. For the notification system, I
+                index <code>{ recipient: 1, read: 1 }</code> so unread count queries are fast.</p>
+            <br>
+            <p>To verify they're being used, I ran <code>.explain("executionStats")</code> on critical queries in
+                Compass and confirmed <code>IXSCAN</code> instead of <code>COLLSCAN</code>. I also looked at
+                <code>totalDocsExamined</code> vs <code>nReturned</code> — if those numbers are far apart, the index
+                isn't selective enough. The email field on the User model has a unique index implicitly because I set
+                <code>unique: true</code> in the Mongoose schema.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What's the difference between a covered query and a regular indexed query?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>A regular indexed query uses the index to find document IDs and then fetches the full documents from
+                storage — two I/O operations. A covered query means all the fields you're projecting are inside the
+                index itself, so MongoDB never needs to touch the actual documents — it serves the response entirely
+                from the index. For example, if I query <code>{ submittedBy: userId }</code> and project only
+                <code>{ status: 1 }</code>, and my index is <code>{ submittedBy: 1, status: 1 }</code>, that's a covered
+                query. It's significantly faster at scale because it reduces disk I/O.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q7 ===== -->
+    <div class="section-label">🔹 API Design</div>
+    <div class="card" id="q7">
+        <span class="q-num">Q7</span>
+        <div><span class="tag tag-section">REST API</span></div>
+        <p class="question">If I call <code>GET /api/reviews</code> as a student vs as an admin, does it return the same
+            data? How does your API handle that?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>API design maturity — shared controller logic with conditional behavior based on role, vs separate
+                endpoints. Also tests understanding of data leakage risks.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>I have one controller function but it branches on <code>req.user.role</code>. If the caller is a student,
+                the query is <code>Review.find({ submittedBy: req.user.userId })</code>. If admin, it's
+                <code>Review.find({})</code> with optional filters from query params like
+                <code>?status=pending&faculty=id</code>. Faculty gets
+                <code>Review.find({ assignedFaculty: req.user.userId })</code>.</p>
+            <br>
+            <p>Alternatively, I could have three separate endpoints — <code>/api/student/reviews</code>,
+                <code>/api/admin/reviews</code>, <code>/api/faculty/reviews</code> — which is actually cleaner for large
+                teams because each route is explicit and auditable. The shared controller approach is DRY but if the
+                logic branches heavily, it becomes hard to maintain. I'd reconsider the separation at scale.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What HTTP status codes do you return for validation errors, auth failure, and server crash?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>400 for validation errors — missing or malformed fields. 401 for unauthenticated — token missing or
+                invalid. 403 for authenticated but not authorized — wrong role. 404 for resource not found. 409 for
+                conflicts — like registering with a duplicate email. 500 for unhandled server errors, but I catch those
+                in a global Express error handler so I never send a stack trace to the client — I log internally and
+                return a generic message.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q8 ===== -->
+    <div class="section-label">🔹 Real-Time System</div>
+    <div class="card" id="q8">
+        <span class="q-num">Q8</span>
+        <div><span class="tag tag-section">Socket.IO</span></div>
+        <p class="question">Explain exactly how your Socket.IO notification system works — from when a review is
+            submitted to when the faculty sees a notification badge update in real-time.</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Deep Socket.IO knowledge — rooms, targeted emission, event patterns, and whether you understand the gap
+                between HTTP REST and WebSocket.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>When the server starts, I initialize Socket.IO on the same HTTP server Express uses. On the client, when
+                a user logs in, they connect to the socket and emit a <code>register</code> event:
+                <code>socket.emit('register', userId)</code>. On the server side, the <code>register</code> handler
+                calls <code>socket.join(userId)</code> — so each user is in their own room named after their userId.</p>
+            <br>
+            <p>When a student submits a review, the REST controller saves the review to MongoDB and then — in the same
+                async function — emits:
+                <code>io.to(facultyId).emit('new_notification', { type: 'review_submitted', ... })</code>. Only the
+                faculty member in that room receives it. On the React side, the faculty's socket listener calls
+                <code>dispatch(addNotification(data))</code>, the Redux slice increments the unread count, and the bell
+                icon re-renders with the new count.</p>
+            <div class="highlight-box">Key insight: The socket server needs access to <code>io</code> inside the Express
+                controller. I solved this by attaching <code>io</code> to <code>app.locals.io = io</code> at server
+                startup and accessing it via <code>req.app.locals.io</code> in controllers — keeps it clean without
+                global variables.</div>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What happens if the faculty member is offline when the notification is emitted? Is it lost?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Yes, in my current implementation the Socket.IO event is lost if they're offline — Socket.IO doesn't
+                persist events. That's why I also persist every notification to MongoDB before emitting the socket
+                event. When the faculty logs back in and loads the dashboard, they call
+                <code>GET /api/notifications?read=false</code> which fetches unread notifications from the DB. The
+                socket is only for the real-time "push" experience — the DB is the source of truth. This is the "dual
+                write" pattern: database for durability, socket for immediacy.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q9 ===== -->
+    <div class="card" id="q9">
+        <span class="q-num">Q9</span>
+        <div><span class="tag tag-section">Socket.IO</span><span class="tag tag-test">Concurrency</span></div>
+        <p class="question">What if 100 students submit reviews at the same time? Walk me through potential race
+            conditions or bottlenecks in your system.</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Understanding of Node.js's single-threaded event loop, MongoDB's document-level locking, and awareness of
+                system limits under load.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>Node.js handles this well at the I/O level — 100 concurrent requests don't block each other because each
+                <code>await Review.save()</code> releases the event loop thread while waiting for MongoDB. No race
+                condition on the review creation itself because each is an independent document insert.</p>
+            <br>
+            <p>The potential bottleneck is the notification emit. 100 reviews saved means 100 socket emissions happening
+                in rapid succession. Socket.IO can handle this, but if each emit triggers a DB write for the
+                notification AND a socket broadcast, we're doing 200 DB operations in that burst. At scale, I'd debounce
+                low-priority notifications or use a message queue (like BullMQ with Redis) — push notification jobs to a
+                queue, process them asynchronously, decouple the review save latency from the notification latency.</p>
+            <br>
+            <p>There's also a connection pool limit with MongoDB — Mongoose defaults to 5 connections. Under 100
+                concurrent requests, you'd hit contention. I'd increase the pool size in Mongoose options:
+                <code>mongoose.connect(uri, { maxPoolSize: 50 })</code>.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What if two admins update the same review at the same time — can that cause data corruption?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>That's a classic lost update problem. MongoDB's <code>findByIdAndUpdate</code> is atomic at the document
+                level, so no partial writes. But if Admin A reads the document, Admin B updates it, and then Admin A
+                writes based on stale data, Admin B's update is silently overwritten. The fix is optimistic concurrency
+                control — add a <code>version</code> field (or use Mongoose's built-in <code>__v</code>), include it in
+                the query: <code>Review.findOneAndUpdate({ _id, version: originalVersion }, updates)</code>. If the
+                version doesn't match (someone else updated it), the update finds no document and returns null — you
+                return a 409 Conflict to the client.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q10 ===== -->
+    <div class="section-label">🔹 Error Handling & Security</div>
+    <div class="card" id="q10">
+        <span class="q-num">Q10</span>
+        <div><span class="tag tag-section">Error Handling</span></div>
+        <p class="question">How do you handle errors in Express? What's your global error handler look like, and how do
+            you prevent stack traces from leaking to clients?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Production readiness — separating operational errors (user did something wrong) from programmer errors
+                (bug), and not leaking internal details.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>All async controller functions are wrapped to forward errors to Express's error middleware via
+                <code>next(err)</code> — or I use an <code>asyncHandler</code> wrapper that catches promise rejections
+                automatically. At the end of the Express middleware chain, I have a global error handler with the
+                <code>(err, req, res, next)</code> signature.</p>
+            <br>
+            <p>Inside it, I check <code>process.env.NODE_ENV</code>. In development, I send the stack trace for
+                debugging. In production, I log the full error internally (to console or a logger) and only send a
+                sanitized response: <code>{ success: false, message: err.message }</code> — and only if
+                <code>err.isOperational</code> is true (meaning I explicitly threw it). Unhandled programmer errors get
+                a generic "Something went wrong" message. I also handle Mongoose-specific errors —
+                <code>CastError</code> becomes a 400, <code>ValidationError</code> becomes a 400 with field-level
+                messages, and duplicate key error (code 11000) becomes a 409.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What happens if a promise rejects inside an async route and you forget to use try/catch or asyncHandler?
+            </p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>In Express 4, an unhandled promise rejection inside a route handler won't crash the server but it also
+                won't send a response — the request just hangs forever and the client times out. In Express 5 (now
+                stable), uncaught async errors are automatically forwarded to the error middleware. But in Express 4, to
+                handle this globally, you'd attach a <code>process.on('unhandledRejection', (reason) => { ... })</code>
+                listener that logs and optionally terminates the process gracefully. That's why the
+                <code>asyncHandler</code> wrapper — it's a safety net that ensures any rejection hits
+                <code>next(err)</code>.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q11 ===== -->
+    <div class="card" id="q11">
+        <span class="q-num">Q11</span>
+        <div><span class="tag tag-section">Security</span></div>
+        <p class="question">Name three security vulnerabilities your app could have, and tell me what you did — or would
+            do — to prevent each one.</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Security mindset beyond "we use JWT." They want real vulnerability awareness — NoSQL injection, XSS, CORS
+                misconfiguration, rate limiting.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p><strong>1. NoSQL Injection:</strong> MongoDB queries can be manipulated if user input is passed directly
+                as objects. For example, a login query <code>User.findOne({ email: req.body.email })</code> is
+                vulnerable if an attacker sends <code>{ "email": { "$gt": "" } }</code>. My fix: use
+                <code>express-mongo-sanitize</code> middleware which strips out keys starting with <code>$</code> or
+                containing <code>.</code> from <code>req.body</code>, <code>req.query</code>, and
+                <code>req.params</code>.</p>
+            <br>
+            <p><strong>2. Overly permissive CORS:</strong> In early development I had
+                <code>cors({ origin: '*' })</code>. In production, I locked it to the specific frontend origin. I also
+                make sure sensitive routes require credentials, not just any origin.</p>
+            <br>
+            <p><strong>3. No rate limiting on auth routes:</strong> Without rate limiting, a bot can attempt unlimited
+                password guesses. I added <code>express-rate-limit</code> with a window of 15 minutes and a max of 10
+                attempts on <code>/api/auth/login</code>. If exceeded, it returns 429.</p>
+            <br>
+            <p>Additional: I use <code>helmet</code> middleware to set security headers —
+                <code>X-Content-Type-Options</code>, <code>X-Frame-Options</code>,
+                <code>Strict-Transport-Security</code> — all set automatically.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What's the difference between authentication and authorization, and which one is harder to get right?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Authentication is "who are you?" — verifying identity. Authorization is "what are you allowed to do?" —
+                verifying permissions. Authorization is harder because it's context-dependent. Authentication is mostly
+                solved by libraries like JWT or OAuth. Authorization requires you to model your business rules correctly
+                — role hierarchies, ownership checks, time-based access, and the intersections. The subtle bugs live in
+                authorization: checking the role but not the ownership, or checking the ownership but not whether the
+                resource is in an allowed state. Those bugs in production mean data exposure, not just access denial.
+            </p>
+        </div>
+    </div>
+
+    <!-- ===== Q12 ===== -->
+    <div class="section-label">🔹 Deployment</div>
+    <div class="card" id="q12">
+        <span class="q-num">Q12</span>
+        <div><span class="tag tag-section">Docker</span><span class="tag tag-test">AWS EC2</span></div>
+        <p class="question">Walk me through your Docker setup. What's in your Dockerfile and docker-compose? Why do you
+            use multi-stage builds?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Whether you actually Dockerized this or just have a Dockerfile that someone else wrote. They want port
+                mapping, volume understanding, multi-stage builds, and env var handling.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>For the backend, my Dockerfile uses a two-stage build. Stage 1 uses <code>node:18-alpine</code>, copies
+                <code>package*.json</code>, runs <code>npm ci --only=production</code>, then copies source. Stage 2
+                copies only the <code>node_modules</code> and source from stage 1 — this keeps dev dependencies out of
+                the final image, cutting image size from ~400MB to ~120MB.</p>
+            <br>
+            <p>My <code>docker-compose.yml</code> has three services: <code>backend</code> (port 5000),
+                <code>frontend</code> (served by nginx internally), and in development <code>mongo</code> (though in
+                production I use MongoDB Atlas). The backend service takes environment variables from a
+                <code>.env</code> file — <code>env_file: .env</code> — so secrets aren't baked into the image. I use
+                named volumes for MongoDB data persistence in dev so the database survives container restarts.</p>
+            <div class="highlight-box">In CI/CD (GitHub Actions), I build the Docker image, push to DockerHub, SSH into
+                EC2, pull the new image, and run <code>docker-compose up -d --no-deps backend</code> to replace only the
+                backend container without downtime on other services.</div>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>If you update environment variables on EC2, does the running container automatically pick them up?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>No — environment variables are baked in at container start time. To pick up new env vars, you need to
+                stop and re-create the container: <code>docker-compose up -d --force-recreate backend</code>. Just
+                restarting the container isn't enough if you only changed the <code>.env</code> file on the host —
+                docker-compose re-reads the env file only when it creates a new container. That's a common gotcha — I
+                learned this when I rotated the MongoDB password and the app was still using the old one until I did a
+                full container recreation.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q13 ===== -->
+    <div class="card" id="q13">
+        <span class="q-num">Q13</span>
+        <div><span class="tag tag-section">Nginx</span></div>
+        <p class="question">How is Nginx configured in your deployment? What does it actually do in your stack?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Whether you understand Nginx as a reverse proxy, SSL termination point, and static file server — not just
+                a "required thing for deployment."</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>Nginx sits in front of everything on port 443 (SSL). It does three jobs: <strong>SSL termination</strong>
+                — handles TLS, so Express never sees HTTPS; <strong>routing</strong> — requests to <code>/api/*</code>
+                are proxied to the Express container at <code>localhost:5000</code>, all other requests serve the React
+                static build; and <strong>security headers</strong> — I set <code>X-Frame-Options</code>,
+                <code>Content-Security-Policy</code>, and <code>Strict-Transport-Security</code> at the Nginx level.</p>
+            <br>
+            <p>The SSL certificate was provisioned via Certbot (Let's Encrypt) on the EC2 instance. Certbot
+                auto-configured the Nginx server block for HTTPS and set up a cron job to auto-renew the cert every 90
+                days.</p>
+            <br>
+            <p>For Socket.IO, Nginx needed special config — WebSocket upgrade headers:
+                <code>proxy_http_version 1.1</code>, <code>proxy_set_header Upgrade $http_upgrade</code>,
+                <code>proxy_set_header Connection "upgrade"</code> — otherwise Socket.IO falls back to polling which is
+                less efficient.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>How do you handle zero-downtime deployments with Nginx and Docker?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>In my current setup, there's a brief moment where the old container is stopped and the new one starts —
+                maybe 2–5 seconds of downtime. True zero-downtime would require either: running two instances and Nginx
+                load balancing between them (blue-green deployment), or using Docker Swarm / Kubernetes rolling updates.
+                With blue-green, I'd start the new container on a different port, health-check it, update the Nginx
+                upstream to point to the new port, reload Nginx with <code>nginx -s reload</code> (which is graceful —
+                doesn't drop active connections), and only then stop the old container.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q14 ===== -->
+    <div class="section-label">🔹 Performance & Scalability</div>
+    <div class="card" id="q14">
+        <span class="q-num">Q14</span>
+        <div><span class="tag tag-section">Performance</span></div>
+        <p class="question">A faculty member complains that the review dashboard takes 4 seconds to load. How do you
+            debug and fix this?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Systematic debugging approach — frontend bundle, network waterfall, API response time, database query
+                time, N+1 queries.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>I'd start with Chrome DevTools Network tab — is the 4 seconds in the initial HTML load, the JS bundle,
+                the API call, or React rendering? If it's the API, I'd check the response time in the Network tab and
+                compare with hitting the endpoint directly in Postman to isolate frontend overhead.</p>
+            <br>
+            <p>On the backend, I'd add timing logs around the DB query using <code>console.time / timeEnd</code>
+                temporarily to see if MongoDB is slow. Most likely culprit: N+1 query. If I'm doing
+                <code>Review.find({ assignedFaculty: id })</code> and then a separate DB call inside a loop for each
+                review's submitter info — that's 1 + N queries. Fix is
+                <code>.populate('submittedBy', 'name email')</code> which Mongoose translates to a single
+                <code>$in</code> query.</p>
+            <br>
+            <p>Frontend side: I'd check if the page is fetching data that it doesn't render immediately. If yes, lazy
+                load with <code>React.lazy</code> and split the heavy component into a separate bundle chunk. Also check
+                if we're re-fetching on every render — means a missing dependency array in <code>useEffect</code> or a
+                new object reference being passed as a prop on each parent render.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>How would you cache the review list so it doesn't hit MongoDB on every page load?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Short-term: RTK Query on the frontend has built-in caching — if the same query was made within
+                <code>keepUnusedDataFor</code> seconds (default 60s), it serves from cache without a network request.
+                Server-side: I'd add Redis in front of the MongoDB query. Key is something like
+                <code>reviews:faculty:${facultyId}:status:pending</code>. First request hits MongoDB, stores result in
+                Redis with a TTL of 30 seconds. Subsequent requests serve from Redis. Cache invalidation: when a
+                review's status changes, I delete the relevant Redis key. The risk is stale data — a review gets updated
+                but the cache hasn't expired. TTL-based expiry handles this automatically; explicit invalidation on
+                writes is more precise but more complex.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q15 ===== -->
+    <div class="card" id="q15">
+        <span class="q-num">Q15</span>
+        <div><span class="tag tag-section">Scalability</span></div>
+        <p class="question">EduNexus currently has 50 users. If it goes to 50,000 users — what breaks first, and how
+            would you redesign it?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>System design thinking — identifying single points of failure, stateful vs stateless architecture,
+                horizontal scaling, and the Socket.IO stickiness problem.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p><strong>First thing that breaks: Socket.IO.</strong> My current setup stores socket connections in memory
+                on a single Node.js process. If I spin up two EC2 instances behind a load balancer, a user connected to
+                Server A won't receive events emitted on Server B. The fix is Socket.IO's Redis adapter — all servers
+                share a pub/sub channel via Redis, so an emit on Server A is received by clients connected to Server B.
+            </p>
+            <br>
+            <p><strong>Second bottleneck: single EC2 instance.</strong> Node.js is single-threaded. I can use
+                <code>cluster</code> module to spawn multiple processes (one per CPU core) on the same instance, or
+                better — run the EC2 behind an Application Load Balancer with sticky sessions enabled (for WebSocket)
+                and multiple instances horizontally.</p>
+            <br>
+            <p><strong>Third: MongoDB Atlas free tier.</strong> At 50K users with active reviews, I'd upgrade to a
+                dedicated cluster with read replicas — route read queries to replicas, keep writes on the primary. Also
+                add sharding on the <code>reviews</code> collection by <code>submittedBy</code> as the shard key.</p>
+            <br>
+            <p><strong>Fourth: no CDN.</strong> Static React assets are served by Nginx on EC2. At scale, these go on S3
+                + CloudFront — edge-cached globally, zero load on EC2 for static files.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>How does the Redis adapter for Socket.IO actually work under the hood?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>When Server A calls <code>io.to(userId).emit('notification', data)</code>, instead of only checking its
+                local in-memory room map, with the Redis adapter it publishes the event to a Redis pub/sub channel.
+                Every Socket.IO server is subscribed to that channel. Server B receives the published message and checks
+                if any of its locally connected sockets are in the <code>userId</code> room — if yes, it delivers the
+                event. So the actual WebSocket delivery still happens from the server that holds the connection; Redis
+                is just the message bus coordinating which server needs to deliver to whom.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q16 ===== -->
+    <div class="card" id="q16">
+        <span class="q-num">Q16</span>
+        <div><span class="tag tag-section">Caching & Rate Limiting</span></div>
+        <p class="question">How would you add Redis caching to this project without breaking the existing data
+            consistency guarantees?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Cache invalidation strategy, read-through vs write-through patterns, and whether you understand that
+                caching introduces eventual consistency.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>I'd use the cache-aside (lazy loading) pattern. On a read request, check Redis first. Cache hit → return
+                immediately. Cache miss → query MongoDB, store result in Redis with a TTL, return result. On any write
+                (status update, new review), I explicitly delete (or update) the relevant cache key — don't wait for TTL
+                to expire, because admin dashboards need fresh data immediately after an action.</p>
+            <br>
+            <p>The tricky part is key design. For <code>GET /api/reviews?faculty=abc&status=pending&page=2</code>, the
+                cache key must encode all query parameters: <code>reviews:faculty:abc:status:pending:page:2</code>. On a
+                bulk status update, I'd use Redis key pattern deletion: <code>DEL reviews:faculty:abc:*</code> to flush
+                all paginated cache for that faculty.</p>
+            <br>
+            <p>I would NOT cache user-specific sensitive data like individual review content in a shared cache layer
+                without namespacing by userId — that risks serving one user's private data to another if keys collide.
+            </p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>What's a cache stampede and how do you prevent it?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Cache stampede happens when a cached key expires and hundreds of requests simultaneously find a cache
+                miss — they all hit MongoDB at once, overloading it. Three prevention strategies: (1) <strong>Mutex
+                    lock</strong> — only one request rebuilds the cache, others wait or get stale data. (2)
+                <strong>Background refresh</strong> — a cron job refreshes the cache before TTL expires, so it never
+                truly expires while data is actively used. (3) <strong>Stale-while-revalidate</strong> — serve the stale
+                cached value immediately and asynchronously refresh in the background. This is what CDNs like CloudFront
+                use natively.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q17 ===== -->
+    <div class="section-label">🔹 Logging & Monitoring</div>
+    <div class="card" id="q17">
+        <span class="q-num">Q17</span>
+        <div><span class="tag tag-section">Logging & Monitoring</span></div>
+        <p class="question">How would you know if your production app is broken right now? What's your monitoring and
+            alerting setup?</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Production maturity — structured logging, observability, not relying on users to report bugs. A common
+                weak spot for junior developers.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer</div>
+            <p>Honestly, in the current state, my monitoring is basic — I'd know something is broken when I manually
+                check EC2 or a user reports it. That's not production-grade, and here's what I'd add.</p>
+            <br>
+            <p><strong>Structured logging</strong> with Winston or Pino — log every request with method, path, status,
+                response time, and userId if authenticated. Output as JSON so logs are parseable by log aggregators. Use
+                log levels: info for normal requests, warn for 4xx, error for 5xx.</p>
+            <br>
+            <p><strong>Health check endpoint:</strong> <code>GET /api/health</code> that checks DB connectivity and
+                returns status 200 with latency. An external uptime monitor (UptimeRobot, free tier) pings this every
+                minute and sends an email alert if it goes down.</p>
+            <br>
+            <p><strong>Error tracking:</strong> Integrate Sentry — it automatically captures unhandled exceptions,
+                groups them by type, and shows a stack trace with request context. One line:
+                <code>Sentry.init({ dsn: '...' })</code> in the Express server.</p>
+            <br>
+            <p><strong>Metrics:</strong> At scale, use PM2 for process monitoring (CPU, memory, restarts) and export
+                metrics to Grafana or CloudWatch. Set CloudWatch alarms on EC2 CPU > 80% sustained for 5 minutes.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>A bug only happens for one specific user in production. How do you debug it without exposing other users'
+                data?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>Structured logs with userId attached make this straightforward — I can filter logs by that userId without
+                reading anyone else's data: <code>grep '"userId":"abc123"' app.log</code>. If using Sentry, I can search
+                errors by userId from the Sentry dashboard. If I need to reproduce locally, I create a test user with
+                similar role/data in a staging environment — never touch production data directly. If the bug is
+                DB-state-dependent, I'd use MongoDB's aggregate pipeline to analyze that user's data in a read-only way,
+                never running write operations on production to debug.</p>
+        </div>
+    </div>
+
+    <!-- ===== Q18 ===== -->
+    <div class="section-label">🔹 Debugging & Tricky Scenarios</div>
+    <div class="card" id="q18">
+        <span class="q-num">Q18</span>
+        <div><span class="tag tag-section">Debugging</span><span class="tag tag-test">Production</span></div>
+        <p class="question">Tell me about the hardest bug you fixed in this project. Walk me through how you found it
+            and fixed it.</p>
+
+        <div class="block">
+            <div class="block-title testing">🔍 What the Interviewer Is Testing</div>
+            <p>Debugging methodology, patience under ambiguity, and whether you have real war stories. Generic answers
+                fail this question.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title answer">✅ Strong Answer (based on known project history)</div>
+            <p>The hardest one was the <strong>HTTP/2 protocol error on production login</strong>. The app worked
+                perfectly locally. After deploying to EC2 with Nginx + Docker, the login API call returned
+                <code>ERR_HTTP2_PROTOCOL_ERROR</code> in the browser. No 4xx, no 5xx — just a protocol error. The token
+                was never received, so users couldn't log in at all.</p>
+            <br>
+            <p>My debugging process: First, I tested the API directly with Postman — it worked. So the problem was in
+                the browser-to-Nginx-to-Express chain specifically. Next, I checked Nginx error logs on EC2 — saw
+                <code>upstream prematurely closed connection</code> and stream reset errors. That pointed to a protocol
+                mismatch. I read the Nginx docs — found that <code>listen 443 ssl http2</code> tells Nginx to use HTTP/2
+                for both incoming and the upstream proxy connection. But Express is HTTP/1.1. Nginx was trying to speak
+                HTTP/2 to Express, Express didn't understand it, and dropped the connection mid-response. Fix was one
+                word: removed <code>http2</code> from the Nginx listen directive. Deployed — login worked instantly.</p>
+            <br>
+            <p>Lesson: production bugs often live in the infrastructure layer, not your application code. Always trace
+                the full request path, not just your code.</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup">💬 Follow-Up</div>
+            <p>How would you have caught this before it hit production?</p>
+        </div>
+
+        <div class="block">
+            <div class="block-title followup-answer">🎯 How to Respond</div>
+            <p>With a proper staging environment that mirrors production exactly — same Nginx config, same Docker
+                networking, same SSL setup. The key gap was that I was testing locally without Nginx and without Docker
+                networking. If I'd had a staging EC2 that was identical to production, I'd have caught it there. A smoke
+                test in the CI/CD pipeline that calls the health check and the login endpoint via HTTPS after deployment
+                would also catch it — the deployment would fail before going live. Automated E2E tests with Playwright
+                that run against the staged environment would be the gold standard.</p>
+        </div>
+    </div>
+
+    <hr>
+    <div style="text-align:center;padding:2rem;color:var(--muted);font-size:.85rem;">
+        EduNexus – Technical Interview Q&A &nbsp;·&nbsp; 18 Questions &nbsp;·&nbsp; MERN Stack &nbsp;·&nbsp; February
+        2026
+    </div>
+</body>
+
+</html>
