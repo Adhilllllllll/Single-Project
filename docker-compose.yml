@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  backend:
+    image: 265230572426.dkr.ecr.ap-south-1.amazonaws.com/edunexus-backend:latest
+    build:
+      context: ./backend
+    container_name: rms-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+    restart: always
+    volumes:
+      - ./uploads:/app/uploads
+    networks:
+      - rms-network
+
+  frontend:
+    image: 265230572426.dkr.ecr.ap-south-1.amazonaws.com/edunexus-frontend:latest
+    build:
+      context: ./frontend
+    container_name: rms-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: always
+    networks:
+      - rms-network
+
+networks:
+  rms-network:
+    driver: bridge
