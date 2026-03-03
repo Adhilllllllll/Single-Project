@@ -1,0 +1,250 @@
+// const mongoose = require("mongoose");
+
+// const studentSchema = new mongoose.Schema(
+//   {
+//     /* ---------------- BASIC IDENTITY ---------------- */
+
+//     name: {
+//       type: String,
+//       required: true,
+//       trim: true,
+//     },
+
+//     email: {
+//       type: String,
+//       required: true,
+//       unique: true,
+//       lowercase: true,
+//       trim: true,
+//     },
+
+//     phone: {
+//       type: String,
+//       trim: true,
+//     },
+
+//     /* ---------------- AUTH & SECURITY ---------------- */
+
+//     passwordHash: {
+//       type: String,
+//       required: true,
+//     },
+
+//     mustChangePassword: {
+//       type: Boolean,
+//       default: true, // admin-created student
+//     },
+
+//     passwordExpiresAt: {
+//       type: Date,
+//       default: null,
+//     },
+
+//     passwordChangedAt: {
+//       type: Date,
+//       default: null,
+//     },
+
+//     status: {
+//       type: String,
+//       enum: ["active", "inactive"],
+//       default: "active",
+//     },
+
+//     /* ---------------- ACADEMIC INFO ---------------- */
+
+//     advisorId: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: "User", // advisor
+//       required: true,
+//     },
+
+//     departmentId: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: "Department",
+//       default: null,
+//     },
+
+//     batch: {
+//       type: String,
+//       trim: true,
+//     },
+
+//     course: {
+//       type: String,
+//       trim: true,
+//     },
+//   },
+//   {
+//     timestamps: true,
+//   }
+// );
+
+// /* ---------------- INDEXES ---------------- */
+
+// studentSchema.index({ email: 1 });
+// studentSchema.index({ advisorId: 1 });
+// studentSchema.index({ status: 1 });
+
+// module.exports = mongoose.model("Student", studentSchema);
+
+const mongoose = require("mongoose");
+
+const studentSchema = new mongoose.Schema(
+  {
+    /* -------- BASIC IDENTITY -------- */
+
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+    },
+
+    /* -------- AUTH & SECURITY -------- */
+
+    passwordHash: {
+      type: String,
+      required: true,
+    },
+
+    mustChangePassword: {
+      type: Boolean,
+      default: true,
+    },
+
+    passwordExpiresAt: {
+      type: Date,
+      default: null,
+    },
+
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+
+    status: {
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
+
+    resetPasswordToken: {
+      type: String,
+      default: null,
+    },
+
+    resetPasswordExpires: {
+      type: Date,
+      default: null,
+    },
+
+    /* -------- ACADEMIC INFO -------- */
+
+    advisorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    departmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Department",
+      default: null,
+    },
+
+    batch: {
+      type: String,
+      trim: true,
+    },
+
+    course: {
+      type: String,
+      trim: true,
+    },
+
+    domain: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    /* -------- PROFILE -------- */
+
+    avatar: {
+      type: String,
+      default: null, // URL to profile picture
+    },
+
+    documents: [
+      {
+        filename: String,
+        path: String,
+        type: String,
+        size: Number,
+        uploadedAt: { type: Date, default: Date.now },
+      },
+    ],
+
+    // === FCM Push Notification Tokens ===
+    // Supports multiple devices per user
+    fcmTokens: [{
+      token: {
+        type: String,
+        required: true,
+      },
+      platform: {
+        type: String,
+        enum: ["web", "android", "ios"],
+        default: "web",
+      },
+      lastUsedAt: {
+        type: Date,
+        default: Date.now,
+      },
+      userAgent: {
+        type: String,
+      },
+    }],
+
+    // === Notification Preferences ===
+    // Controls push notification delivery (socket always works)
+    notificationPreferences: {
+      // Global push notification toggle
+      pushEnabled: {
+        type: Boolean,
+        default: true,
+      },
+      // Muted conversations - no push for these chats
+      mutedChats: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Conversation",
+      }],
+    },
+  },
+  { timestamps: true }
+);
+
+/* -------- INDEXES -------- */
+// NOTE: email index NOT needed here - `unique: true` on field already creates one
+// studentSchema.index({ email: 1 });   // REMOVED: Duplicate (Mongoose warning fix)
+studentSchema.index({ advisorId: 1 });
+studentSchema.index({ status: 1 });
+
+// === PHASE 2: Performance Index for Admin Dashboard ===
+// Supports: getAllUsers ($sort by createdAt), getRecentActivity
+studentSchema.index({ createdAt: -1 });
+
+module.exports = mongoose.model("Student", studentSchema);
