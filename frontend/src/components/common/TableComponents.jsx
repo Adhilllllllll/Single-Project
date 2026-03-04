@@ -6,14 +6,14 @@ import React from "react";
 ============================================ */
 const TabSwitcher = React.memo(({ tabs, activeTab, onTabChange }) => {
     return (
-        <div className="flex border-b border-slate-200">
+        <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap pb-1 scrollbar-hide">
             {tabs.map((tab) => (
                 <button
                     key={tab.id}
                     onClick={() => onTabChange(tab.id)}
                     className={`px-4 py-3 text-sm font-medium transition-colors relative ${activeTab === tab.id
-                            ? "text-orange-600"
-                            : "text-slate-500 hover:text-slate-700"
+                        ? "text-orange-600"
+                        : "text-slate-500 hover:text-slate-700"
                         }`}
                 >
                     {tab.label}
@@ -125,20 +125,22 @@ const DataTable = React.memo(({ columns, data, renderRow, emptyMessage = "No dat
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
-                    <tr>
-                        {columns.map((col) => (
-                            <th key={col.key} className="px-6 py-4">
-                                {col.label}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {data.map((row, index) => renderRow(row, index))}
-                </tbody>
-            </table>
+            <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
+                        <tr>
+                            {columns.map((col) => (
+                                <th key={col.key} className="px-6 py-4">
+                                    {col.label}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {data.map((row, index) => renderRow(row, index))}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 });

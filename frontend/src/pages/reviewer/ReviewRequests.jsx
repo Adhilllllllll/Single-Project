@@ -156,12 +156,12 @@ const ReviewRequests = () => {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-900">Review Requests</h2>
                     <p className="text-slate-500">Manage incoming review requests</p>
                 </div>
-                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-medium">
+                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-medium self-start sm:self-auto">
                     {reviews.length} Requests
                 </span>
             </div>
@@ -202,112 +202,114 @@ const ReviewRequests = () => {
                         No review requests found.
                     </div>
                 ) : (
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
-                            <tr>
-                                <th className="px-6 py-3">Student</th>
-                                <th className="px-6 py-3">Advisor</th>
-                                <th className="px-6 py-3">Date & Time</th>
-                                <th className="px-6 py-3">Domain</th>
-                                <th className="px-6 py-3">Status</th>
-                                <th className="px-6 py-3">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {filteredReviews.map((request) => {
-                                const badge = getStatusBadge(request.status);
-                                const isPending = request.status === "pending";
-                                return (
-                                    <tr key={request._id} className="hover:bg-slate-50">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold text-sm">
-                                                    {request.student?.name?.charAt(0) || "S"}
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[750px]">
+                            <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                                <tr>
+                                    <th className="px-6 py-3">Student</th>
+                                    <th className="px-6 py-3">Advisor</th>
+                                    <th className="px-6 py-3">Date & Time</th>
+                                    <th className="px-6 py-3">Domain</th>
+                                    <th className="px-6 py-3">Status</th>
+                                    <th className="px-6 py-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filteredReviews.map((request) => {
+                                    const badge = getStatusBadge(request.status);
+                                    const isPending = request.status === "pending";
+                                    return (
+                                        <tr key={request._id} className="hover:bg-slate-50">
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold text-sm">
+                                                        {request.student?.name?.charAt(0) || "S"}
+                                                    </div>
+                                                    <span className="font-medium text-slate-900">
+                                                        {request.student?.name || "Unknown"}
+                                                    </span>
                                                 </div>
-                                                <span className="font-medium text-slate-900">
-                                                    {request.student?.name || "Unknown"}
+                                            </td>
+                                            <td className="px-6 py-4 text-slate-600">
+                                                {request.advisor?.name || "Unknown"}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="text-slate-900">{formatDate(request.scheduledAt)}</div>
+                                                <div className="text-xs text-slate-500">{formatTime(request.scheduledAt)}</div>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {request.advisor?.domain ? (
+                                                    <span className="text-slate-700">{request.advisor.domain}</span>
+                                                ) : (
+                                                    <span className="text-slate-400 italic">Not specified</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bg} ${badge.text}`}>
+                                                    {badge.label}
                                                 </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-slate-600">
-                                            {request.advisor?.name || "Unknown"}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="text-slate-900">{formatDate(request.scheduledAt)}</div>
-                                            <div className="text-xs text-slate-500">{formatTime(request.scheduledAt)}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {request.advisor?.domain ? (
-                                                <span className="text-slate-700">{request.advisor.domain}</span>
-                                            ) : (
-                                                <span className="text-slate-400 italic">Not specified</span>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${badge.bg} ${badge.text}`}>
-                                                {badge.label}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex gap-2">
-                                                {/* View Button */}
-                                                <button
-                                                    onClick={() => handleView(request._id)}
-                                                    className="p-1.5 text-slate-500 hover:text-purple-600 transition-colors"
-                                                    title="View Details"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                                    </svg>
-                                                </button>
-
-                                                {/* Accept Button - Only for pending */}
-                                                {isPending && (
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <div className="flex gap-2">
+                                                    {/* View Button */}
                                                     <button
-                                                        onClick={() => handleAccept(request._id)}
-                                                        disabled={actionLoading}
-                                                        className="p-1.5 text-green-600 hover:text-green-800 transition-colors disabled:opacity-50"
-                                                        title="Accept"
+                                                        onClick={() => handleView(request._id)}
+                                                        className="p-1.5 text-slate-500 hover:text-purple-600 transition-colors"
+                                                        title="View Details"
                                                     >
                                                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                                         </svg>
                                                     </button>
-                                                )}
 
-                                                {/* Reject Button - Only for pending */}
-                                                {isPending && (
-                                                    <button
-                                                        onClick={() => handleRejectClick(request._id)}
-                                                        disabled={actionLoading}
-                                                        className="p-1.5 text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
-                                                        title="Reject"
-                                                    >
-                                                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                        </svg>
-                                                    </button>
-                                                )}
+                                                    {/* Accept Button - Only for pending */}
+                                                    {isPending && (
+                                                        <button
+                                                            onClick={() => handleAccept(request._id)}
+                                                            disabled={actionLoading}
+                                                            className="p-1.5 text-green-600 hover:text-green-800 transition-colors disabled:opacity-50"
+                                                            title="Accept"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        </button>
+                                                    )}
 
-                                                {/* Mark Complete Button - Only for accepted */}
-                                                {request.status === "accepted" && (
-                                                    <button
-                                                        onClick={() => handleCompleteClick(request)}
-                                                        disabled={actionLoading}
-                                                        className="px-3 py-1 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
-                                                        title="Mark as Completed"
-                                                    >
-                                                        Complete
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
+                                                    {/* Reject Button - Only for pending */}
+                                                    {isPending && (
+                                                        <button
+                                                            onClick={() => handleRejectClick(request._id)}
+                                                            disabled={actionLoading}
+                                                            className="p-1.5 text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+                                                            title="Reject"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    )}
+
+                                                    {/* Mark Complete Button - Only for accepted */}
+                                                    {request.status === "accepted" && (
+                                                        <button
+                                                            onClick={() => handleCompleteClick(request)}
+                                                            disabled={actionLoading}
+                                                            className="px-3 py-1 bg-teal-600 text-white text-xs font-medium rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+                                                            title="Mark as Completed"
+                                                        >
+                                                            Complete
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 

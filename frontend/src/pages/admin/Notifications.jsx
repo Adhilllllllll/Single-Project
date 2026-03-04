@@ -177,7 +177,7 @@ const Notifications = () => {
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-slate-200">
+            <div className="flex border-b border-slate-200 overflow-x-auto whitespace-nowrap pb-1">
                 <button onClick={() => setActiveTab("send")} className={`px-4 py-2 text-sm font-medium ${activeTab === "send" ? "border-b-2 border-blue-600 text-blue-600" : "text-slate-500"}`}>
                     Send Notification
                 </button>
@@ -236,35 +236,37 @@ const Notifications = () => {
                     ) : sentNotifications.length === 0 ? (
                         <div className="p-8 text-center text-slate-500">No notifications sent yet</div>
                     ) : (
-                        <table className="w-full">
-                            <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500">
-                                <tr>
-                                    <th className="px-6 py-3 text-left">Title</th>
-                                    <th className="px-6 py-3 text-left">Date Sent</th>
-                                    <th className="px-6 py-3 text-left">Sent To</th>
-                                    <th className="px-6 py-3 text-left">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {sentNotifications.map((notification) => (
-                                    <tr key={notification.id} className="hover:bg-slate-50">
-                                        <td className="px-6 py-4">
-                                            <div className="font-medium text-slate-900 text-sm">{notification.title}</div>
-                                            <div className="text-xs text-slate-500 truncate max-w-xs">{notification.message}</div>
-                                        </td>
-                                        <td className="px-6 py-4 text-sm text-slate-600">{formatDate(notification.dateSent)}</td>
-                                        <td className="px-6 py-4">
-                                            <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">{formatRecipientGroup(notification.recipientGroup)}</span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${notification.status === "delivered" ? "bg-green-100 text-green-700" : notification.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>
-                                                {notification.status === "delivered" ? "Delivered" : notification.status === "pending" ? "Pending" : "Failed"}
-                                            </span>
-                                        </td>
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500">
+                                    <tr>
+                                        <th className="px-6 py-3 text-left">Title</th>
+                                        <th className="px-6 py-3 text-left">Date Sent</th>
+                                        <th className="px-6 py-3 text-left">Sent To</th>
+                                        <th className="px-6 py-3 text-left">Status</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {sentNotifications.map((notification) => (
+                                        <tr key={notification.id} className="hover:bg-slate-50">
+                                            <td className="px-6 py-4">
+                                                <div className="font-medium text-slate-900 text-sm">{notification.title}</div>
+                                                <div className="text-xs text-slate-500 truncate max-w-xs">{notification.message}</div>
+                                            </td>
+                                            <td className="px-6 py-4 text-sm text-slate-600">{formatDate(notification.dateSent)}</td>
+                                            <td className="px-6 py-4">
+                                                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">{formatRecipientGroup(notification.recipientGroup)}</span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${notification.status === "delivered" ? "bg-green-100 text-green-700" : notification.status === "pending" ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>
+                                                    {notification.status === "delivered" ? "Delivered" : notification.status === "pending" ? "Pending" : "Failed"}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
             )}
@@ -272,7 +274,7 @@ const Notifications = () => {
             {/* Student Issues Tab */}
             {activeTab === "issues" && (
                 <>
-                    <div className="grid grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div onClick={() => setStatusFilter("")} className={`bg-white p-4 rounded-xl shadow-sm border cursor-pointer hover:shadow-md transition ${!statusFilter ? "ring-2 ring-blue-500" : "border-slate-200"}`}>
                             <div className="text-2xl font-bold text-slate-900">{issueCounts.total || 0}</div>
                             <div className="text-sm text-slate-500">Total Issues</div>

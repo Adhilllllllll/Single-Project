@@ -39,12 +39,12 @@ const Students = () => {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-900">My Students</h2>
                     <p className="text-slate-500">View and manage your assigned students</p>
                 </div>
-                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium">
+                <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium self-start sm:self-auto">
                     {students.length} Students
                 </span>
             </div>
@@ -77,53 +77,55 @@ const Students = () => {
                         <p className="text-slate-500 text-sm">Students will appear here once they are assigned to you by the admin.</p>
                     </div>
                 ) : (
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
-                            <tr>
-                                <th className="px-6 py-3">Name</th>
-                                <th className="px-6 py-3">Email</th>
-                                <th className="px-6 py-3">Current Status</th>
-                                <th className="px-6 py-3">Last Review Date</th>
-                                <th className="px-6 py-3">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {students.map((student) => (
-                                <tr key={student._id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-green-100 text-green-600 flex items-center justify-center font-bold text-sm">
-                                                {student.name?.charAt(0) || "S"}
-                                            </div>
-                                            <span className="font-medium text-slate-900">{student.name}</span>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-500">{student.email}</td>
-                                    <td className="px-6 py-4">
-                                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'Active'
-                                            ? 'bg-green-100 text-green-700'
-                                            : student.status === 'Review'
-                                                ? 'bg-blue-100 text-blue-700'
-                                                : 'bg-amber-100 text-amber-700'
-                                            }`}>
-                                            {student.status}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-500">
-                                        {formatDate(student.lastReviewDate)}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <button
-                                            onClick={() => handleViewProfile(student._id)}
-                                            className="text-sm text-green-600 hover:text-green-800 font-medium hover:underline transition-colors"
-                                        >
-                                            View Profile
-                                        </button>
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[650px]">
+                            <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                                <tr>
+                                    <th className="px-6 py-3">Name</th>
+                                    <th className="px-6 py-3">Email</th>
+                                    <th className="px-6 py-3">Current Status</th>
+                                    <th className="px-6 py-3">Last Review Date</th>
+                                    <th className="px-6 py-3">Action</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {students.map((student) => (
+                                    <tr key={student._id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-full bg-green-100 text-green-600 flex items-center justify-center font-bold text-sm">
+                                                    {student.name?.charAt(0) || "S"}
+                                                </div>
+                                                <span className="font-medium text-slate-900">{student.name}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-500">{student.email}</td>
+                                        <td className="px-6 py-4">
+                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${student.status === 'Active'
+                                                ? 'bg-green-100 text-green-700'
+                                                : student.status === 'Review'
+                                                    ? 'bg-blue-100 text-blue-700'
+                                                    : 'bg-amber-100 text-amber-700'
+                                                }`}>
+                                                {student.status}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-500">
+                                            {formatDate(student.lastReviewDate)}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <button
+                                                onClick={() => handleViewProfile(student._id)}
+                                                className="text-sm text-green-600 hover:text-green-800 font-medium hover:underline transition-colors"
+                                            >
+                                                View Profile
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 

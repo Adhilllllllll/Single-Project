@@ -97,11 +97,11 @@ const TaskRow = React.memo(({ task, onUpload, uploading }) => {
                         <div className="flex items-center gap-2 mt-1">
                             {task.category && (
                                 <span className={`px-2 py-0.5 text-xs rounded-full ${task.category === "Coding" ? "bg-blue-100 text-blue-700" :
-                                        task.category === "Documentation" ? "bg-purple-100 text-purple-700" :
-                                            task.category === "Communication" ? "bg-orange-100 text-orange-700" :
-                                                task.category === "Research" ? "bg-cyan-100 text-cyan-700" :
-                                                    task.category === "Project" ? "bg-green-100 text-green-700" :
-                                                        "bg-slate-100 text-slate-700"
+                                    task.category === "Documentation" ? "bg-purple-100 text-purple-700" :
+                                        task.category === "Communication" ? "bg-orange-100 text-orange-700" :
+                                            task.category === "Research" ? "bg-cyan-100 text-cyan-700" :
+                                                task.category === "Project" ? "bg-green-100 text-green-700" :
+                                                    "bg-slate-100 text-slate-700"
                                     }`}>
                                     {task.category}
                                 </span>
@@ -336,18 +336,20 @@ const Tasks = () => {
                 {activeTab === "tasks" ? (
                     tasksLoading ? (
                         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
-                                    <tr>
-                                        {TASK_COLUMNS.map((col) => (
-                                            <th key={col.key} className="px-6 py-4">{col.label}</th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {renderSkeletonRows()}
-                                </tbody>
-                            </table>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
+                                        <tr>
+                                            {TASK_COLUMNS.map((col) => (
+                                                <th key={col.key} className="px-6 py-4">{col.label}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {renderSkeletonRows()}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     ) : (
                         <DataTable
@@ -360,18 +362,20 @@ const Tasks = () => {
                 ) : (
                     workshopsLoading ? (
                         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            <table className="w-full text-left text-sm">
-                                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
-                                    <tr>
-                                        {WORKSHOP_COLUMNS.map((col) => (
-                                            <th key={col.key} className="px-6 py-4">{col.label}</th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {renderSkeletonRows()}
-                                </tbody>
-                            </table>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
+                                        <tr>
+                                            {WORKSHOP_COLUMNS.map((col) => (
+                                                <th key={col.key} className="px-6 py-4">{col.label}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {renderSkeletonRows()}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     ) : (
                         <DataTable

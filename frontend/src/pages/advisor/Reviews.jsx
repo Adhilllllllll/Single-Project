@@ -237,88 +237,90 @@ const Reviews = () => {
                         </p>
                     </div>
                 ) : (
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
-                            <tr>
-                                <th className="px-6 py-3">Student</th>
-                                <th className="px-6 py-3">Reviewer</th>
-                                <th className="px-6 py-3">Date & Time</th>
-                                <th className="px-6 py-3">Domain</th>
-                                <th className="px-6 py-3">Status</th>
-                                <th className="px-6 py-3">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {filteredReviews.map(review => (
-                                <tr key={review.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-6 py-4 font-medium text-slate-900">{review.student}</td>
-                                    <td className="px-6 py-4 text-blue-600">{review.reviewer}</td>
-                                    <td className="px-6 py-4">
-                                        <div className="text-slate-900">{review.date}</div>
-                                        <div className="text-xs text-slate-500">{review.time}</div>
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-600">{review.domain || "General"}</td>
-                                    <td className="px-6 py-4">
-                                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(review.status)}`}>
-                                            {review.status}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-2">
-                                            {/* View Button - Always visible */}
-                                            <button
-                                                onClick={() => handleView(review)}
-                                                className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 transition-colors"
-                                            >
-                                                View
-                                            </button>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[800px]">
+                            <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200 uppercase text-xs">
+                                <tr>
+                                    <th className="px-6 py-3">Student</th>
+                                    <th className="px-6 py-3">Reviewer</th>
+                                    <th className="px-6 py-3">Date & Time</th>
+                                    <th className="px-6 py-3">Domain</th>
+                                    <th className="px-6 py-3">Status</th>
+                                    <th className="px-6 py-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filteredReviews.map(review => (
+                                    <tr key={review.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="px-6 py-4 font-medium text-slate-900">{review.student}</td>
+                                        <td className="px-6 py-4 text-blue-600">{review.reviewer}</td>
+                                        <td className="px-6 py-4">
+                                            <div className="text-slate-900">{review.date}</div>
+                                            <div className="text-xs text-slate-500">{review.time}</div>
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-600">{review.domain || "General"}</td>
+                                        <td className="px-6 py-4">
+                                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(review.status)}`}>
+                                                {review.status}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-2">
+                                                {/* View Button - Always visible */}
+                                                <button
+                                                    onClick={() => handleView(review)}
+                                                    className="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded hover:bg-blue-700 transition-colors"
+                                                >
+                                                    View
+                                                </button>
 
-                                            {/* Reschedule & Cancel - Only for scheduled/pending/accepted */}
-                                            {review.status?.toLowerCase() !== "completed" &&
-                                                review.status?.toLowerCase() !== "scored" &&
-                                                review.status?.toLowerCase() !== "cancelled" && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => handleReschedule(review)}
-                                                            className="px-3 py-1 bg-amber-500 text-white text-xs font-medium rounded hover:bg-amber-600 transition-colors"
-                                                        >
-                                                            Reschedule
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleCancel(review)}
-                                                            className="px-3 py-1 bg-red-500 text-white text-xs font-medium rounded hover:bg-red-600 transition-colors"
-                                                        >
-                                                            Cancel
-                                                        </button>
-                                                    </>
+                                                {/* Reschedule & Cancel - Only for scheduled/pending/accepted */}
+                                                {review.status?.toLowerCase() !== "completed" &&
+                                                    review.status?.toLowerCase() !== "scored" &&
+                                                    review.status?.toLowerCase() !== "cancelled" && (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleReschedule(review)}
+                                                                className="px-3 py-1 bg-amber-500 text-white text-xs font-medium rounded hover:bg-amber-600 transition-colors"
+                                                            >
+                                                                Reschedule
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleCancel(review)}
+                                                                className="px-3 py-1 bg-red-500 text-white text-xs font-medium rounded hover:bg-red-600 transition-colors"
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </>
+                                                    )}
+
+                                                {/* Give Final Score - Only for completed reviews */}
+                                                {review.status?.toLowerCase() === "completed" && (
+                                                    <button
+                                                        onClick={() => handleGiveFinalScore(review)}
+                                                        disabled={finalScoreLoading}
+                                                        className="px-3 py-1 bg-teal-600 text-white text-xs font-medium rounded hover:bg-teal-700 transition-colors disabled:opacity-50"
+                                                    >
+                                                        {finalScoreLoading ? "Loading..." : "Final Score"}
+                                                    </button>
                                                 )}
 
-                                            {/* Give Final Score - Only for completed reviews */}
-                                            {review.status?.toLowerCase() === "completed" && (
-                                                <button
-                                                    onClick={() => handleGiveFinalScore(review)}
-                                                    disabled={finalScoreLoading}
-                                                    className="px-3 py-1 bg-teal-600 text-white text-xs font-medium rounded hover:bg-teal-700 transition-colors disabled:opacity-50"
-                                                >
-                                                    {finalScoreLoading ? "Loading..." : "Final Score"}
-                                                </button>
-                                            )}
-
-                                            {/* View Final Score - Only for scored reviews */}
-                                            {review.status?.toLowerCase() === "scored" && (
-                                                <span className={`px-3 py-1 text-xs font-medium rounded border ${review.marks >= 8 ? "bg-green-50 text-green-700 border-green-200" :
+                                                {/* View Final Score - Only for scored reviews */}
+                                                {review.status?.toLowerCase() === "scored" && (
+                                                    <span className={`px-3 py-1 text-xs font-medium rounded border ${review.marks >= 8 ? "bg-green-50 text-green-700 border-green-200" :
                                                         review.marks >= 6 ? "bg-yellow-50 text-yellow-700 border-yellow-200" :
                                                             "bg-red-50 text-red-700 border-red-200"
-                                                    }`}>
-                                                    Scored: {review.marks}/10
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                                                        }`}>
+                                                        Scored: {review.marks}/10
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 

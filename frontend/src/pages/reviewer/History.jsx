@@ -103,12 +103,12 @@ const History = () => {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-900">Review History</h2>
                     <p className="text-slate-500">Your completed reviews with submitted scores</p>
                 </div>
-                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-medium">
+                <span className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-medium self-start sm:self-auto">
                     {pagination.total} Completed
                 </span>
             </div>
@@ -173,72 +173,74 @@ const History = () => {
                         </p>
                     </div>
                 ) : (
-                    <table className="w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
-                            <tr>
-                                <th className="px-6 py-3">Student</th>
-                                <th className="px-6 py-3">Date</th>
-                                <th className="px-6 py-3">Domain</th>
-                                <th className="px-6 py-3">Avg Score</th>
-                                <th className="px-6 py-3">Status</th>
-                                <th className="px-6 py-3">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                            {filteredHistory.map((review) => (
-                                <tr key={review.id} className="hover:bg-slate-50">
-                                    <td className="px-6 py-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold text-sm">
-                                                {review.student?.name?.charAt(0) || "S"}
-                                            </div>
-                                            <span className="font-medium text-slate-900">
-                                                {review.student?.name || "Unknown"}
-                                            </span>
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-600">
-                                        {formatDate(review.scheduledAt)}
-                                    </td>
-                                    <td className="px-6 py-4 text-slate-600">
-                                        {review.advisor?.domain || "General"}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        {review.averageScore !== null ? (
-                                            <span className={`font-bold ${review.averageScore >= 7 ? "text-green-600" : review.averageScore >= 5 ? "text-amber-600" : "text-red-600"}`}>
-                                                {review.averageScore.toFixed(1)}/10
-                                            </span>
-                                        ) : (
-                                            <span className="text-slate-400">—</span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-medium ${review.status === "scored" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                                            {review.status === "scored" ? "Scored" : "Completed"}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <button
-                                            onClick={() => handleView(review)}
-                                            className="p-1.5 text-slate-500 hover:text-purple-600 transition-colors"
-                                            title="View Details"
-                                        >
-                                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                            </svg>
-                                        </button>
-                                    </td>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm min-w-[700px]">
+                            <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                                <tr>
+                                    <th className="px-6 py-3">Student</th>
+                                    <th className="px-6 py-3">Date</th>
+                                    <th className="px-6 py-3">Domain</th>
+                                    <th className="px-6 py-3">Avg Score</th>
+                                    <th className="px-6 py-3">Status</th>
+                                    <th className="px-6 py-3">Action</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filteredHistory.map((review) => (
+                                    <tr key={review.id} className="hover:bg-slate-50">
+                                        <td className="px-6 py-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-9 h-9 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold text-sm">
+                                                    {review.student?.name?.charAt(0) || "S"}
+                                                </div>
+                                                <span className="font-medium text-slate-900">
+                                                    {review.student?.name || "Unknown"}
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-600">
+                                            {formatDate(review.scheduledAt)}
+                                        </td>
+                                        <td className="px-6 py-4 text-slate-600">
+                                            {review.advisor?.domain || "General"}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            {review.averageScore !== null ? (
+                                                <span className={`font-bold ${review.averageScore >= 7 ? "text-green-600" : review.averageScore >= 5 ? "text-amber-600" : "text-red-600"}`}>
+                                                    {review.averageScore.toFixed(1)}/10
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-400">—</span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${review.status === "scored" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                                                {review.status === "scored" ? "Scored" : "Completed"}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <button
+                                                onClick={() => handleView(review)}
+                                                className="p-1.5 text-slate-500 hover:text-purple-600 transition-colors"
+                                                title="View Details"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                </svg>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </div>
 
             {/* Pagination */}
             {pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                     <span className="text-sm text-slate-500">
                         Page {pagination.page} of {pagination.totalPages}
                     </span>
